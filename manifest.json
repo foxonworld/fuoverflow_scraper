@@ -1,0 +1,18 @@
+{
+  "name": "SRC by NguyenAnh",
+  "short_name": "FuExam",
+  "description": "Nền tảng học thuật với công cụ theo dõi tiến trình và Hệ thống tạo đề thi thử.",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ffffff",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "type": "image/svg+xml",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ]
+}

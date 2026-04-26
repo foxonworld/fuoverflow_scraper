@@ -1,0 +1,127 @@
+{
+    "USERNAME": "foxonworld",
+    "PASSWORD": "Anh1234545",
+    "AI_PROVIDER": "gemini",
+    "GEMINI_API_KEY": "AIzaSyAbFrXEVSdTWeiVmo0M474-iaSYeZL6MDk",
+    "GROQ_API_KEY": "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",
+    "SOURCES": [
+        {
+            "id": "mln122-sp26-c1fe.6344",
+            "name": "mln122-sp26-c1fe.6344",
+            "url": "https://fuoverflow.com/threads/mln122-sp26-c1fe.6344/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-sp26-c2fe.6343",
+            "name": "mln122-sp26-c2fe.6343",
+            "url": "https://fuoverflow.com/threads/mln122-sp26-c2fe.6343/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-fa25-c1fe.5338",
+            "name": "mln122-fa25-c1fe.5338",
+            "url": "https://fuoverflow.com/threads/mln122-fa25-c1fe.5338/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-su25-c2-final-exam.4341",
+            "name": "mln122-su25-c2-final-exam.4341",
+            "url": "https://fuoverflow.com/threads/mln122-su25-c2-final-exam.4341/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-sp-2025-block-5-2.3870",
+            "name": "mln122-sp-2025-block-5-2.3870",
+            "url": "https://fuoverflow.com/threads/mln122-sp-2025-block-5-2.3870/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-fa-2024-fe-c2.3031",
+            "name": "mln122-fa-2024-fe-c2.3031",
+            "url": "https://fuoverflow.com/threads/mln122-fa-2024-fe-c2.3031/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-su-2024-fe.2402",
+            "name": "mln122-su-2024-fe.2402",
+            "url": "https://fuoverflow.com/threads/mln122-su-2024-fe.2402/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "mln122-sp-2024-fe.1658",
+            "name": "mln122-sp-2024-fe.1658",
+            "url": "https://fuoverflow.com/threads/mln122-sp-2024-fe.1658/",
+            "subject": "MLN122",
+            "enabled": true
+        },
+        {
+            "id": "0v2by1c4s",
+            "name": "mln122-sp-2024-re.1728",
+            "url": "https://fuoverflow.com/threads/mln122-sp-2024-re.1728/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "a7zaterl8",
+            "name": "mln122-fa-2024-fe-c1.3030",
+            "url": "https://fuoverflow.com/threads/mln122-fa-2024-fe-c1.3030/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "cgncsq759",
+            "name": "mln122-fa-2024-re.3104",
+            "url": "https://fuoverflow.com/threads/mln122-fa-2024-re.3104/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "tzl10moni",
+            "name": "mln122-sp-2025-block-5-1.3840",
+            "url": "https://fuoverflow.com/threads/mln122-sp-2025-block-5-1.3840/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "88th0tsrd",
+            "name": "mln122-sp-2025-fe.3637",
+            "url": "https://fuoverflow.com/threads/mln122-sp-2025-fe.3637/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "z6y20gort",
+            "name": "mln122-su25-re-half2.4611",
+            "url": "https://fuoverflow.com/threads/mln122-su25-re-half2.4611/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "tnd5kpx70",
+            "name": "mln122-sp-2025-re.3734",
+            "url": "https://fuoverflow.com/threads/mln122-sp-2025-re.3734/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        },
+        {
+            "id": "nyxse4omv",
+            "name": "mln122-su-2023-block-5-2.748",
+            "url": "https://fuoverflow.com/threads/mln122-su-2023-block-5-2.748/",
+            "subject": "MLN122_v2",
+            "enabled": true
+        }
+    ],
+    "IMAGES_DIR": "images",
+    "IMAGES_WORD_DIR": "images_word",
+    "ENABLE_WORD_EXPORT": false,
+    "ENABLE_OCR_CLASSIFY": false,
+    "PAGE_TIMEOUT": 15,
+    "REQUEST_DELAY": 5
+}

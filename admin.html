@@ -1,0 +1,1143 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FU-EXAM | PRO LABORATORY</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #05080f;
+            --card-bg: rgba(15, 23, 42, 0.6);
+            --sidebar-bg: rgba(10, 15, 30, 0.9);
+            --accent: #00e5ff; /* Cyber Blue */
+            --accent-glow: rgba(0, 229, 255, 0.3);
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(51, 65, 85, 0.4);
+            --danger: #ff4d4d;
+            --success: #00f2c3;
+            --warning: #ffb86c;
+            --sidebar-width: 280px;
+        }
+
+        * { box-sizing: border-box; }
+        body {
+            background: var(--bg);
+            background-image: radial-gradient(circle at 20% 20%, #1e293b 0%, #05080f 50%);
+            color: var(--text);
+            font-family: 'Inter', sans-serif;
+            margin: 0;
+            display: flex;
+            height: 100vh;
+            overflow: hidden;
+        }
+
+        /* Sidebar Glassmorphism */
+        .sidebar {
+            width: var(--sidebar-width);
+            background: var(--sidebar-bg);
+            backdrop-filter: blur(20px);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+            padding: 30px 0;
+            z-index: 1000;
+        }
+
+        .logo-area {
+            padding: 0 30px;
+            margin-bottom: 40px;
+        }
+        .logo {
+            font-size: 24px;
+            font-weight: 800;
+            color: var(--accent);
+            text-shadow: 0 0 15px var(--accent-glow);
+            letter-spacing: -1px;
+            display: flex; align-items: center; gap: 10px;
+        }
+
+        .nav-group { margin-bottom: 30px; }
+        .nav-label {
+            padding: 0 30px;
+            font-size: 11px;
+            font-weight: 700;
+            text-transform: uppercase;
+            color: var(--text-muted);
+            letter-spacing: 1.5px;
+            margin-bottom: 15px;
+        }
+
+        .nav-item {
+            padding: 12px 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            color: var(--text-muted);
+            border-left: 4px solid transparent;
+        }
+        .nav-item:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.05);
+        }
+        .nav-item.active {
+            color: var(--accent);
+            background: rgba(0, 229, 255, 0.05);
+            border-left-color: var(--accent);
+        }
+        .nav-item i { font-size: 18px; }
+
+        /* Main Content */
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            position: relative;
+        }
+
+        .top-bar {
+            height: 80px;
+            padding: 0 40px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            background: rgba(5, 8, 15, 0.5);
+            backdrop-filter: blur(10px);
+        }
+
+        .content-scroll {
+            flex: 1;
+            overflow-y: auto;
+            padding: 40px;
+        }
+
+        .screen { display: none; animation: fadeIn 0.4s ease-out; }
+        .screen.active { display: block; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+
+        /* Cards & Grids */
+        .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 25px; }
+        .card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--border);
+            border-radius: 18px;
+            padding: 25px;
+            transition: all 0.3s;
+        }
+        .card:hover { border-color: var(--accent); box-shadow: 0 10px 40px rgba(0,0,0,0.4); }
+
+        .btn {
+            padding: 12px 24px;
+            border-radius: 12px;
+            border: none;
+            font-weight: 600;
+            cursor: pointer;
+            transition: 0.2s;
+            display: inline-flex; align-items: center; gap: 8px;
+        }
+        .btn-primary { background: var(--accent); color: #000; box-shadow: 0 0 15px var(--accent-glow); }
+        .btn-primary:hover { transform: scale(1.05); filter: brightness(1.1); }
+        .btn-secondary { background: rgba(255,255,255,0.1); color: var(--text); }
+        .btn-danger { background: var(--danger); color: white; }
+        
+        .badge { padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; }
+        .badge-tf { background: var(--warning); color: #000; }
+        .badge-mcq { background: var(--success); color: #000; }
+
+        /* HUD Stats */
+        .hud-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 20px; margin-bottom: 40px; }
+        .hud-item {
+            padding: 30px;
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            text-align: center;
+        }
+        .hud-val { font-size: 36px; font-weight: 800; color: var(--accent); margin-bottom: 5px; }
+        .hud-label { font-size: 12px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 1px; }
+
+        /* Console Style */
+        .console-area {
+            background: #000;
+            border-radius: 15px;
+            padding: 20px;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 13px;
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #1e293b;
+        }
+        .log-line { margin-bottom: 4px; border-left: 2px solid #334155; padding-left: 10px; }
+        .log-info { color: #818cf8; }
+        .log-success { color: var(--success); }
+        .log-error { color: var(--danger); }
+
+        /* Form Controls */
+        .form-group { margin-bottom: 20px; }
+        .form-label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+        .form-control {
+            width: 100%;
+            background: rgba(0,0,0,0.3);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 12px 15px;
+            color: white;
+            font-size: 14px;
+            transition: 0.3s;
+        }
+        .form-control:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 10px var(--accent-glow); }
+
+        /* Subject Cards Hub */
+        .subject-card {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            padding: 20px;
+            display: flex; flex-direction: column; gap: 15px;
+            transition: 0.3s;
+        }
+        .subject-card.hidden { opacity: 0.5; filter: grayscale(1); }
+        .subject-img-preview {
+            width: 100%; height: 140px; background: #000; border-radius: 12px;
+            display: flex; align-items: center; justify-content: center; overflow: hidden;
+        }
+        .subject-img-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.85); backdrop-filter: blur(5px);
+            z-index: 2000; display: none; align-items: center; justify-content: center;
+        }
+        .modal-overlay.active { display: flex; }
+        .modal {
+            width: 90%; max-width: 1000px; max-height: 90vh;
+            background: #0f172a; border: 1px solid var(--accent); border-radius: 24px;
+            display: flex; flex-direction: column; overflow: hidden;
+        }
+        .modal-header { padding: 25px 30px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+        .modal-body { padding: 30px; overflow-y: auto; flex: 1; }
+
+        /* Tool Status Heartbeat */
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; margin-right: 8px; }
+        .dot-idle { background: var(--text-muted); }
+        .dot-running { background: var(--success); box-shadow: 0 0 10px var(--success); animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(1); opacity: 1; } 50% { transform: scale(1.3); opacity: 0.5; } 100% { transform: scale(1); opacity: 1; } }
+
+        input:checked + .slider { background-color: var(--accent); }
+        input:checked + .slider:before { transform: translateX(22px); }
+
+        /* Answer Badge on Review */
+        .ans-badge {
+            position: absolute; bottom: 10px; right: 10px;
+            background: var(--accent); color: #000;
+            padding: 4px 10px; border-radius: 6px;
+            font-weight: 800; font-size: 14px;
+            box-shadow: 0 0 10px var(--accent-glow);
+            z-index: 10;
+        }
+        .subject-img-preview { cursor: pointer; position: relative; }
+        .subject-img-preview:hover img { filter: brightness(1.2); }
+        
+        .filter-tabs { display: flex; gap: 10px; margin-bottom: 20px; }
+        .filter-tab {
+            padding: 8px 16px; border-radius: 8px; background: rgba(255,255,255,0.05);
+            cursor: pointer; font-size: 13px; font-weight: 600; transition: 0.3s;
+        }
+        .filter-tab.active { background: var(--accent); color: #000; }
+    </style>
+</head>
+<body>
+    <div class="sidebar">
+        <div class="logo-area">
+            <div class="logo">🚀 FU-EXAM PRO</div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-label">General</div>
+            <div class="nav-item active" onclick="showScreen('overview')">📊 Overview</div>
+            <div class="nav-item" onclick="showScreen('hub')">📁 Subject Hub</div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-label">Tools</div>
+            <div class="nav-item" onclick="showScreen('crawler')">🕸️ Robot Crawler</div>
+            <div class="nav-item" onclick="showScreen('auditor')">🛡️ Answer Auditor</div>
+            <div class="nav-item" onclick="showScreen('lab')">🧠 AI Laboratory</div>
+        </div>
+
+        <div class="nav-group">
+            <div class="nav-label">System</div>
+            <div class="nav-item" onclick="showScreen('settings')">⚙️ Settings</div>
+            <div class="nav-item" onclick="window.open('/index.html', '_blank')">🌐 Open Website</div>
+        </div>
+
+        <div style="margin-top: auto; padding: 0 30px; font-size: 11px; color: var(--text-muted);">
+            v2.0 PRO EDITION<br>
+            Server Status: <span style="color: var(--success);">Online</span>
+        </div>
+    </div>
+
+    <div class="main-container">
+        <div class="top-bar">
+            <h2 id="screen-title" style="margin: 0; font-size: 20px;">System Overview</h2>
+            <div style="display: flex; gap: 20px; align-items: center;">
+                <div id="global-status">
+                    <span class="status-dot dot-idle"></span> <span id="status-text">Idle</span>
+                </div>
+                <button class="btn btn-secondary" onclick="refreshAll()">🔄 Refresh</button>
+            </div>
+        </div>
+
+        <div class="content-scroll">
+            
+            <!-- OVERVIEW SCREEN -->
+            <div id="screen-overview" class="screen active">
+                <div class="hud-grid">
+                    <div class="hud-item"><div class="hud-val" id="hud-subjects">-</div><div class="hud-label">Total Subjects</div></div>
+                    <div class="hud-item"><div class="hud-val" id="hud-questions">-</div><div class="hud-label">Total Questions</div></div>
+                    <div class="hud-item"><div class="hud-val" id="hud-accuracy">-</div><div class="hud-label">Ans A Dist.</div></div>
+                </div>
+                <div class="card">
+                    <h3>📢 Quick Notice</h3>
+                    <p style="color: var(--text-muted);">Chào mừng bạn quay lại hệ thống quản lý. Hãy sử dụng các menu bên trái để điều khiển Crawler hoặc quét AI lọc câu trùng. Nhớ kiểm tra API Key trong mục Settings trước khi chạy.</p>
+                </div>
+            </div>
+
+            <!-- SUBJECT HUB SCREEN -->
+            <div id="screen-hub" class="screen">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 25px;">
+                    <input type="text" class="form-control" placeholder="Search subjects..." style="max-width: 300px;" onkeyup="filterHub(this.value)">
+                    <div style="display: flex; gap: 10px;">
+                        <button class="btn btn-secondary" onclick="loadSubjects()">🔄 Sync Data</button>
+                    </div>
+                </div>
+                <div id="subjects-grid" class="grid">
+                    <!-- Cards injected by JS -->
+                </div>
+            </div>
+
+            <!-- CRAWLER SCREEN -->
+            <div id="screen-crawler" class="screen">
+                <div class="card" style="margin-bottom: 25px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <h3 style="margin: 0;">🕸️ Robot Crawler Control</h3>
+                            <p style="color: var(--text-muted); font-size: 13px;">Chọn các nguồn dữ liệu bên dưới để bắt đầu cào.</p>
+                        </div>
+                        <div style="display: flex; gap: 15px;">
+                            <button id="btn-crawler-start" class="btn btn-primary" onclick="startCrawler()">▶️ Start Selected</button>
+                            <button id="btn-crawler-stop" class="btn btn-danger" onclick="stopCrawler()" disabled>⏹️ Stop</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="grid" style="grid-template-columns: 350px 1fr; gap: 25px;">
+                    <div class="card" style="height: fit-content;">
+                        <h4 style="margin-top: 0;">📍 Select Sources</h4>
+                        <div id="crawler-source-list" style="max-height: 400px; overflow-y: auto; display: flex; flex-direction: column; gap: 10px;">
+                            <!-- Checkboxes injected by JS -->
+                        </div>
+                    </div>
+                    <div class="console-area" id="crawler-console" style="height: 465px;">
+                        <div class="log-line log-info">Ready to start crawling...</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AUDITOR SCREEN -->
+            <div id="screen-auditor" class="screen">
+                <div class="card" style="margin-bottom: 25px;">
+                    <h3>🛡️ Answer Auditor</h3>
+                    <p style="color: var(--text-muted);">Đối soát lại đáp án từ các comment trên FuOverflow để tìm conflict.</p>
+                    <div style="margin-top: 20px; display: flex; gap: 15px;">
+                        <select id="auditor-subject-select" class="form-control" style="max-width: 300px;">
+                            <option value="">-- Chọn môn để đối soát --</option>
+                        </select>
+                        <button class="btn btn-primary" onclick="openAuditSelection()">🛡️ Bắt đầu quét Comment</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- AI LAB SCREEN -->
+            <div id="screen-lab" class="screen">
+                <div class="card" style="margin-bottom: 25px;">
+                    <h3>🧠 AI Laboratory (Groq)</h3>
+                    <p style="color: var(--text-muted);">Xử lý dữ liệu nâng cao sau khi cào.</p>
+                    <div style="margin-top: 20px; display: flex; flex-wrap: wrap; gap: 15px; align-items: center;">
+                        <select id="lab-subject-select" class="form-control" style="max-width: 200px;">
+                            <option value="">-- Chọn môn --</option>
+                        </select>
+                        <select id="lab-source-select" class="form-control" style="max-width: 200px;">
+                            <option value="">-- Tất cả Mã Đề --</option>
+                        </select>
+                        <div style="display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+                            <button class="btn btn-primary" onclick="startAIClean('scan')">🪄 Lọc trùng AI (Full)</button>
+                            <button class="btn btn-secondary" onclick="startAIClean('test')">⚡ Quét thử 3 câu</button>
+                            <button class="btn btn-secondary" onclick="reanalyzeData()">🔍 Xem lại các câu đã quét (Offline)</button>
+                            <button class="btn btn-secondary" onclick="startAIClassify()">✏️ Phân loại T/F</button>
+                            <button class="btn btn-accent" id="btn-view-ai-results" onclick="showAIResults()" style="display:none; color:#000; font-weight:bold;">👁️ Xem kết quả quét cũ</button>
+                        </div>
+                    </div>
+                </div>
+                <div id="lab-progress-area" style="display: none;">
+                    <div class="hud-label" id="lab-status-text">AI Scanning...</div>
+                    <div style="width: 100%; height: 10px; background: #1e293b; border-radius: 5px; margin: 15px 0; overflow: hidden;">
+                        <div id="lab-progress-bar" style="width: 0%; height: 100%; background: var(--accent); transition: 0.3s;"></div>
+                    </div>
+                    <div class="console-area" id="lab-console" style="height: 250px;"></div>
+                </div>
+            </div>
+
+            <!-- SETTINGS SCREEN -->
+            <div id="screen-settings" class="screen">
+                <form id="settings-form">
+                    <div class="grid">
+                        <div class="card">
+                            <h3>👤 User Credentials</h3>
+                            <div class="form-group">
+                                <label class="form-label">Username</label>
+                                <input type="text" name="USERNAME" class="form-control" required>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Password</label>
+                                <input type="password" name="PASSWORD" class="form-control" required>
+                            </div>
+                        </div>
+                        <div class="card">
+                            <h3>🔑 AI API Configuration</h3>
+                            <div class="form-group">
+                                <label class="form-label">Primary AI Provider</label>
+                                <select name="AI_PROVIDER" class="form-control">
+                                    <option value="gemini">Google Gemini (Recommended - Faster Free Tier)</option>
+                                    <option value="groq">Groq (Llama 4 Scout)</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Gemini API Key</label>
+                                <input type="password" name="GEMINI_API_KEY" class="form-control" placeholder="AIzaSy...">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Groq API Key</label>
+                                <input type="password" name="GROQ_API_KEY" class="form-control" placeholder="gsk_...">
+                            </div>
+                            <div style="display: flex; align-items: center; gap: 10px;">
+                                <button type="button" class="btn btn-secondary btn-sm" onclick="testAIConnection()">⚡ Test Connection</button>
+                                <span id="ai-api-status" style="font-size: 0.9em; font-weight: bold;"></span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 25px;">
+                        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                            <h3 style="margin: 0;">📡 Data Source Manager</h3>
+                            <button type="button" class="btn btn-primary btn-sm" onclick="addNewSourceRow()">+ Thêm Nguồn Mới</button>
+                        </div>
+                        <div style="overflow-x: auto;">
+                            <table class="table" style="width: 100%; border-collapse: collapse;">
+                                <thead>
+                                    <tr style="text-align: left; border-bottom: 1px solid var(--border);">
+                                        <th style="padding: 10px;">Tên (Mã Đề)</th>
+                                        <th style="padding: 10px;">Link FuOverflow</th>
+                                        <th style="padding: 10px;">Môn</th>
+                                        <th style="padding: 10px; width: 50px;"></th>
+                                    </tr>
+                                </thead>
+                                <tbody id="source-table-body">
+                                    <!-- Rows injected by JS -->
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+
+                    <div class="card" style="margin-top: 25px;">
+                        <h3>⚙️ Scraper Engine Parameters</h3>
+                            <div class="form-group">
+                                <label class="form-label">Request Delay (s)</label>
+                                <input type="number" name="REQUEST_DELAY" class="form-control">
+                            </div>
+                            <div class="form-group">
+                                <label class="form-label">Page Timeout (s)</label>
+                                <input type="number" name="PAGE_TIMEOUT" class="form-control">
+                            </div>
+                        </div>
+                        <div style="display: flex; justify-content: flex-end;">
+                            <button type="submit" class="btn btn-primary">💾 Save All Configuration</button>
+                        </div>
+                    </div>
+                </form>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Modals -->
+    <div id="data-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <h2 id="modal-title" style="margin:0;">Subject Content</h2>
+                <button class="btn btn-secondary" onclick="closeModal()">Close</button>
+            </div>
+            <div class="modal-body">
+                <div id="data-list" class="grid"></div>
+                <div id="data-pagination" style="display:flex; justify-content:center; gap:20px; margin-top:30px;"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="ai-review-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h2 style="margin:0;">AI Duplicate Review</h2>
+                    <div id="ai-review-stats" style="font-size:12px; color:var(--text-muted); margin-top:5px;"></div>
+                </div>
+                <div style="display:flex; gap:15px;">
+                    <button class="btn btn-secondary btn-sm" onclick="exportV2()">📦 Xuất bản Copy sạch (v2)</button>
+                    <button class="btn btn-danger btn-sm" id="btn-delete-all-shown" onclick="resolveBulkDupes()">🗑️ Xóa tất cả đang hiển thị</button>
+                    <button class="btn btn-secondary" onclick="document.getElementById('ai-review-modal').classList.remove('active')">Close</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div class="filter-tabs">
+                    <div class="filter-tab active" onclick="filterReview('all', this)">Tất cả</div>
+                    <div class="filter-tab" onclick="filterReview('same', this)">Cùng đáp án</div>
+                    <div class="filter-tab" onclick="filterReview('diff', this)">Khác đáp án</div>
+                </div>
+                <div id="ai-review-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentSubject = "";
+        let currentPage = 1;
+        let ws;
+        let allSubjects = [];
+
+        // --- CORE NAVIGATION ---
+        function showScreen(id) {
+            document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(n => n.classList.remove('active'));
+            
+            const targetScreen = document.getElementById('screen-' + id);
+            const targetNav = Array.from(document.querySelectorAll('.nav-item')).find(n => n.innerText.toLowerCase().includes(id.replace('-', ' ')));
+            
+            if (targetScreen) targetScreen.classList.add('active');
+            if (targetNav) targetNav.classList.add('active');
+            
+            const titles = {
+                'overview': '📊 System Overview',
+                'hub': '📁 Subject Data Hub',
+                'crawler': '🕸️ Robot Crawler Control',
+                'auditor': '🛡️ Answer Auditor Tool',
+                'lab': '🧠 AI Laboratory',
+                'settings': '⚙️ System Configuration'
+            };
+            document.getElementById('screen-title').innerText = titles[id] || 'Dashboard';
+            
+            if (id === 'hub') loadSubjects();
+            if (id === 'overview') updateStats();
+            if (id === 'lab') testGroq();
+        }
+
+        // --- DATA HUB ---
+        async function loadSubjects() {
+            try {
+                const res = await fetch('/api/data/subjects');
+                const data = await res.json();
+                allSubjects = data.subjects;
+                const metadata = data.metadata || {};
+                renderSubjects(allSubjects, metadata);
+                
+                // Update Selects
+                ['auditor', 'lab'].forEach(id => {
+                    const select = document.getElementById(`${id}-subject-select`);
+                    if(select) select.innerHTML = '<option value="">-- Chọn môn --</option>' + data.subjects.map(s => `<option value="${s.name}">${s.name}</option>`).join('');
+                });
+                
+                if (document.getElementById('lab-subject-select')) {
+                    document.getElementById('lab-subject-select').onchange = (e) => updateLabSources(e.target.value);
+                }
+                
+            } catch (err) { console.error(err); }
+        }
+
+        async function updateLabSources(subject) {
+            const select = document.getElementById('lab-source-select');
+            if (!subject) {
+                select.innerHTML = '<option value="">-- Tất cả Mã Đề --</option>';
+                return;
+            }
+            const res = await fetch(`/api/data/subjects/${subject}?limit=1`);
+            const data = await res.json();
+            select.innerHTML = '<option value="">-- Tất cả Mã Đề --</option>' + 
+                data.sources.map(s => `<option value="${s}">${s}</option>`).join('');
+        }
+
+        function renderSubjects(subjects, metadata) {
+            const grid = document.getElementById('subjects-grid');
+            grid.innerHTML = subjects.map(s => {
+                const isHidden = metadata[s.name]?.hidden || false;
+                return `
+                    <div class="subject-card ${isHidden ? 'hidden' : ''}">
+                        <div style="display:flex; justify-content:space-between; align-items:start;">
+                            <div style="font-weight:700; font-size:18px;">${s.name}</div>
+                            <label class="switch">
+                                <input type="checkbox" ${!isHidden ? 'checked' : ''} onchange="toggleVisibility('${s.name}', this.checked)">
+                                <span class="slider"></span>
+                            </label>
+                        </div>
+                        <div style="font-size:12px; color:var(--text-muted);">
+                            ${s.count} Questions • Last Sync: ${new Date().toLocaleDateString()}
+                        </div>
+                        <div style="display:flex; gap:10px; margin-top:10px;">
+                            <button class="btn btn-secondary btn-sm" style="flex:1;" onclick="viewSubject('${s.name}')">👁️ View</button>
+                            <button class="btn btn-secondary btn-sm" onclick="cloneSubject('${s.name}')" title="Clone v2">📋</button>
+                            <button class="btn btn-danger btn-sm" onclick="deleteSubject('${s.name}')">🗑️</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterHub(query) {
+            const filtered = allSubjects.filter(s => s.name.toLowerCase().includes(query.toLowerCase()));
+            renderSubjects(filtered, {});
+        }
+
+        async function toggleVisibility(name, isVisible) {
+            await fetch(`/api/data/subjects/${name}/visibility?hidden=${!isVisible}`, { method: 'POST' });
+            loadSubjects();
+        }
+
+        async function cloneSubject(name) {
+            const newName = prompt(`Enter name for clone:`, `${name}_v2`);
+            if(!newName) return;
+            await fetch(`/api/data/subjects/${name}/clone?new_name=${newName}`, { method: 'POST' });
+            loadSubjects();
+        }
+
+        async function deleteSubject(name) {
+            if(!confirm(`Xóa vĩnh viễn môn ${name}?`)) return;
+            await fetch(`/api/data/subjects/${name}`, { method: 'DELETE' });
+            loadSubjects();
+        }
+
+        async function viewSubject(name) {
+            currentSubject = name; currentPage = 1;
+            document.getElementById('modal-title').textContent = "📦 Subject: " + name;
+            document.getElementById('data-modal').classList.add('active');
+            loadSubjectData(1);
+        }
+
+        async function loadSubjectData(page) {
+            currentPage = page;
+            const listEl = document.getElementById('data-list');
+            const sourceId = document.getElementById('hub-source-filter')?.value || "";
+            try {
+                const res = await fetch(`/api/data/subjects/${currentSubject}?page=${page}&limit=12&source_id=${sourceId}`);
+                const data = await res.json();
+                
+                if (page === 1) {
+                    const filterHtml = `<select id="hub-source-filter" class="form-control" style="margin-bottom:15px;" onchange="loadSubjectData(1)">
+                        <option value="">-- Tất cả Mã Đề --</option>
+                        ${data.sources.map(s => `<option value="${s}" ${s === sourceId ? 'selected' : ''}>${s}</option>`).join('')}
+                    </select>`;
+                    const filterContainer = document.getElementById('modal-filter-container') || document.createElement('div');
+                    filterContainer.id = 'modal-filter-container';
+                    filterContainer.innerHTML = filterHtml;
+                    if (!document.getElementById('modal-filter-container')) listEl.parentElement.insertBefore(filterContainer, listEl);
+                }
+
+                listEl.innerHTML = data.items.map(item => `
+                    <div class="card" style="padding:15px;">
+                        <div class="subject-img-preview" onclick="previewImage('/static/${item.img}')">
+                            <img src="/static/${item.img}" onerror="this.src='https://placehold.co/200x150?text=Loi+Anh'">
+                        </div>
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
+                            <span style="font-size:10px; color:var(--text-muted);">${item.source_id || 'Legacy'} #${item.original_index}</span>
+                            <div style="display:flex; gap:5px;">
+                                <span class="badge ${item.type === 'TF' ? 'badge-tf' : 'badge-mcq'}">${item.type || 'MCQ'}</span>
+                                <span style="background:var(--accent); color:#000; padding:2px 8px; border-radius:4px; font-weight:bold; cursor:pointer;" onclick="cycleAnswer('${currentSubject}', ${item.original_index}, '${item.ans}')">${item.ans || '?'}</span>
+                                <button style="background:none; border:none; color:var(--text-muted); cursor:pointer;" onclick="deleteItem(${item.original_index})">🗑️</button>
+                            </div>
+                        </div>
+                    </div>
+                `).join('');
+                
+                const pages = Math.ceil(data.total / data.limit) || 1;
+                document.getElementById('data-pagination').innerHTML = `
+                    <button class="btn btn-secondary btn-sm" ${page === 1 ? 'disabled' : ''} onclick="loadSubjectData(${page-1})">Prev</button>
+                    <span>${page} / ${pages}</span>
+                    <button class="btn btn-secondary btn-sm" ${page === pages ? 'disabled' : ''} onclick="loadSubjectData(${page+1})">Next</button>
+                `;
+            } catch (err) {}
+        }
+
+        async function cycleAnswer(name, index, currentAns) {
+            const nextMap = { 'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A', '': 'A' };
+            const nextAns = nextMap[currentAns.toUpperCase()] || 'A';
+            await fetch(`/api/data/subjects/${name}/items/${index}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ ans: nextAns })
+            });
+            loadSubjectData(currentPage);
+        }
+
+        async function deleteItem(index) {
+            if(!confirm("Xóa câu hỏi này?")) return;
+            await fetch(`/api/data/subjects/${currentSubject}/items/${index}`, { method: 'DELETE' });
+            loadSubjectData(currentPage);
+        }
+
+        function closeModal() { document.getElementById('data-modal').classList.remove('active'); }
+        function previewImage(src) { window.open(src, '_blank'); }
+
+        // --- CRAWLER CONTROL ---
+        async function startCrawler() {
+            const selectedIds = Array.from(document.querySelectorAll('.source-checkbox:checked')).map(cb => cb.value);
+            if (selectedIds.length === 0) return alert("Vui lòng chọn ít nhất 1 nguồn để cào!");
+            
+            try {
+                const res = await fetch('/api/start', { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ source_ids: selectedIds })
+                });
+                if (res.ok) {
+                    document.getElementById('crawler-console').innerHTML = '<div class="log-line log-success">🚀 Crawler starting...</div>';
+                    document.getElementById('btn-crawler-start').disabled = true;
+                    document.getElementById('btn-crawler-stop').disabled = false;
+                }
+            } catch (err) { alert(err); }
+        }
+
+        async function stopCrawler() {
+            try {
+                await fetch('/api/stop', { method: 'POST' });
+            } catch (err) { alert(err); }
+        }
+
+        // --- AI LAB ---
+        async function testAIConnection() {
+            const status = document.getElementById('ai-api-status');
+            status.innerText = "⏳ Testing...";
+            status.style.color = "var(--text-muted)";
+            try {
+                const res = await fetch('/api/ai/test');
+                const data = await res.json();
+                status.innerText = data.ok ? "Connected ✅" : "Error: " + (data.error || "❌");
+                status.style.color = data.ok ? "var(--success)" : "var(--danger)";
+            } catch (err) { status.innerText = "Error: " + err; }
+        }
+
+        async function reanalyzeData() {
+            const subject = document.getElementById('lab-subject-select').value;
+            if (!subject) return alert("Vui lòng chọn môn!");
+            
+            try {
+                const res = await fetch(`/api/ai/clean/${subject}/reanalyze`, { method: 'POST' });
+                const data = await res.json();
+                
+                document.getElementById('lab-progress-area').style.display = 'block';
+                document.getElementById('lab-console').innerHTML = '';
+                pollAIProgress();
+            } catch (e) {
+                console.error(e);
+            }
+        }
+
+        async function startAIClean(mode = 'scan') {
+            const name = document.getElementById('lab-subject-select').value;
+            if (!name) return alert("Please select a subject");
+            
+            const isTest = mode === 'test';
+            const confirmMsg = isTest ? "Chạy quét thử 3 câu?" : `Bắt đầu quét toàn bộ bộ đề ${name}?`;
+            if (!confirm(confirmMsg)) return;
+            
+            try {
+                const res = await fetch(`/api/ai/clean/${name}/${mode}`, { method: 'POST' });
+                if (res.ok) {
+                    document.getElementById('lab-progress-area').style.display = 'block';
+                    document.getElementById('lab-console').innerHTML = `<div class="log-line log-info">AI ${mode} started...</div>`;
+                    pollAIProgress();
+                }
+            } catch (err) { alert(err); }
+        }
+
+        async function pollAIProgress() {
+            const res = await fetch('/api/ai/clean/results');
+            const data = await res.json();
+            const prog = data.progress;
+            const viewBtn = document.getElementById('btn-view-ai-results');
+            
+            if (data.results) {
+                viewBtn.style.display = 'inline-block';
+            }
+
+            if (prog) {
+                const pct = prog.total > 0 ? (prog.current / prog.total) * 100 : 0;
+                document.getElementById('lab-progress-bar').style.width = pct + '%';
+                document.getElementById('lab-status-text').innerText = prog.status;
+                if (prog.status === "Scan Complete") {
+                    document.getElementById('lab-console').innerHTML += '<div class="log-line log-success">✨ Finished. Duplicates found!</div>';
+                    if (viewBtn) viewBtn.style.display = 'inline-block';
+                    showAIResults();
+                    return;
+                }
+            }
+            setTimeout(pollAIProgress, 1000);
+        }
+
+        let currentDuplicates = [];
+        let currentFilter = 'all';
+
+        async function showAIResults() {
+            const modal = document.getElementById('ai-review-modal');
+            const container = document.getElementById('ai-review-container');
+            modal.classList.add('active');
+            container.innerHTML = '<div style="text-align:center; padding:50px;">⏳ Đang đối chiếu dữ liệu...</div>';
+            
+            const res = await fetch('/api/ai/clean/results');
+            const data = await res.json();
+            const results = data.results;
+            const subject = document.getElementById('lab-subject-select').value;
+            
+            const qRes = await fetch(`/api/data/subjects/${subject}?limit=2000`);
+            const qData = await qRes.json();
+            const questions = qData.items;
+            
+            // Build currentDuplicates array with answer info
+            currentDuplicates = [];
+            const dupes = [...(results.exact || []), ...(results.fuzzy || [])];
+            dupes.forEach(pair => {
+                const q1 = questions[pair[0]];
+                const q2 = questions[pair[1]];
+                if (q1 && q2) {
+                    currentDuplicates.push({
+                        masterIdx: pair[0],
+                        dupeIdx: pair[1],
+                        masterId: q1.id,
+                        dupeId: q2.id,
+                        masterImg: q1.img,
+                        dupeImg: q2.img,
+                        masterAns: q1.ans || '?',
+                        dupeAns: q2.ans || '?',
+                        isSame: (q1.ans || '?') === (q2.ans || '?')
+                    });
+                }
+            });
+
+            renderReviewList();
+        }
+
+        function filterReview(type, el) {
+            currentFilter = type;
+            document.querySelectorAll('.filter-tab').forEach(t => t.classList.remove('active'));
+            el.classList.add('active');
+            renderReviewList();
+        }
+
+        function renderReviewList() {
+            const container = document.getElementById('ai-review-container');
+            const subject = document.getElementById('lab-subject-select').value;
+            
+            let filtered = currentDuplicates;
+            if (currentFilter === 'same') filtered = currentDuplicates.filter(d => d.isSame);
+            if (currentFilter === 'diff') filtered = currentDuplicates.filter(d => !d.isSame);
+
+            document.getElementById('ai-review-stats').innerText = `Tìm thấy ${currentDuplicates.length} cặp trùng. Đang hiển thị: ${filtered.length}`;
+            
+            if (filtered.length === 0) {
+                container.innerHTML = `<div style="text-align:center; padding:50px; color:var(--text-muted);">Không có cặp nào khớp với bộ lọc "${currentFilter}".</div>`;
+                return;
+            }
+
+            container.innerHTML = filtered.map(d => `
+                <div class="card" style="margin-bottom:20px; border-left: 4px solid ${d.isSame ? 'var(--success)' : 'var(--danger)'}; position:relative;">
+                    <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 15px;">
+                        <div>
+                            <div style="font-size:11px; margin-bottom:5px;">Master (#${d.masterIdx})</div>
+                            <div class="subject-img-preview" onclick="previewImage('/static/${d.masterImg}')">
+                                <img src="/static/${d.masterImg}">
+                                <div class="ans-badge">Đáp án: ${d.masterAns}</div>
+                            </div>
+                        </div>
+                        <div>
+                            <div style="font-size:11px; margin-bottom:5px;">Duplicate (#${d.dupeIdx})</div>
+                            <div class="subject-img-preview" onclick="previewImage('/static/${d.dupeImg}')">
+                                <img src="/static/${d.dupeImg}">
+                                <div class="ans-badge">Đáp án: ${d.dupeAns}</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="margin-top:15px; display:flex; justify-content:center;">
+                        <button class="btn btn-primary btn-sm" onclick="resolveDupe('${subject}', '${d.dupeId}')">Xóa câu trùng (#${d.dupeIdx})</button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function resolveDupe(subject, id) {
+            if(!confirm(`Xóa câu hỏi này?`)) return;
+            await fetch(`/api/data/subjects/${subject}/items/${id}`, { method: 'DELETE' });
+            // Xóa khỏi mảng cục bộ để cập nhật UI ngay lập tức
+            currentDuplicates = currentDuplicates.filter(d => d.dupeId !== id);
+            renderReviewList();
+        }
+
+        async function resolveBulkDupes() {
+            const subject = document.getElementById('lab-subject-select').value;
+            let filtered = currentDuplicates;
+            if (currentFilter === 'same') filtered = currentDuplicates.filter(d => d.isSame);
+            if (currentFilter === 'diff') filtered = currentDuplicates.filter(d => !d.isSame);
+
+            if (filtered.length === 0) return;
+            
+            const msg = currentFilter === 'all' ? "TẤT CẢ câu trùng" : (currentFilter === 'same' ? "tất cả câu CÙNG ĐÁP ÁN" : "tất cả câu KHÁC ĐÁP ÁN");
+            if (!confirm(`Bạn có chắc chắn muốn xóa vĩnh viễn ${filtered.length} câu trùng (${msg})?`)) return;
+
+            const ids = filtered.map(d => d.dupeId);
+            const res = await fetch(`/api/data/subjects/${subject}/items/bulk_delete`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(ids)
+            });
+            
+            if (res.ok) {
+                // Cập nhật mảng cục bộ
+                currentDuplicates = currentDuplicates.filter(d => !ids.includes(d.dupeId));
+                renderReviewList();
+                alert(`Đã xóa thành công ${ids.length} câu.`);
+            }
+        }
+
+        async function exportV2() {
+            const subject = document.getElementById('lab-subject-select').value;
+            if (!subject) return;
+            
+            if (!confirm(`Tạo bản copy mới (${subject}_v2) đã loại bỏ hết các câu trùng lặp?`)) return;
+            
+            try {
+                const res = await fetch(`/api/ai/clean/${subject}/export_v2`, { method: 'POST' });
+                const data = await res.json();
+                if (res.ok) {
+                    alert(`✅ Thành công! Đã tạo môn mới: ${data.new_subject} với ${data.count} câu.`);
+                    location.reload(); // Reload để cập nhật danh sách môn
+                } else {
+                    alert("Lỗi: " + data.detail);
+                }
+            } catch (e) {
+                alert("Lỗi kết nối: " + e);
+            }
+        }
+
+        // --- STATS & STATUS ---
+        async function updateStats() {
+            try {
+                const res = await fetch('/api/data/stats');
+                const data = await res.json();
+                document.getElementById('hud-subjects').innerText = data.total_subjects;
+                document.getElementById('hud-questions').innerText = data.total_questions;
+                const aRate = ((data.answer_distribution.A / (data.total_questions || 1)) * 100).toFixed(1);
+                document.getElementById('hud-accuracy').innerText = aRate + '%';
+            } catch (err) {}
+        }
+
+        async function pollStatus() {
+            try {
+                const res = await fetch('/api/status');
+                const status = await res.json();
+                const dot = document.querySelector('.status-dot');
+                const text = document.getElementById('status-text');
+                const btnStart = document.getElementById('btn-crawler-start');
+                const btnStop = document.getElementById('btn-crawler-stop');
+                
+                if (status.running) {
+                    dot.className = "status-dot dot-running";
+                    text.innerText = "Robot Running (PID: " + status.pid + ")";
+                    if(btnStart) btnStart.disabled = true;
+                    if(btnStop) btnStop.disabled = false;
+                } else {
+                    dot.className = "status-dot dot-idle";
+                    text.innerText = "System Idle";
+                    if(btnStart) btnStart.disabled = false;
+                    if(btnStop) btnStop.disabled = true;
+                }
+            } catch (err) {}
+            setTimeout(pollStatus, 2000);
+        }
+
+        // --- LOGS ---
+        function connectWS() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            ws = new WebSocket(`${protocol}//${window.location.host}/ws/logs`);
+            ws.onmessage = (e) => {
+                const line = document.createElement('div');
+                line.className = 'log-line';
+                if (e.data.includes('❌') || e.data.includes('LỖI')) line.classList.add('log-error');
+                if (e.data.includes('✅') || e.data.includes('✨')) line.classList.add('log-success');
+                line.innerText = e.data;
+                
+                ['crawler-console', 'lab-console'].forEach(cid => {
+                    const c = document.getElementById(cid);
+                    if(c) {
+                        c.appendChild(line.cloneNode(true));
+                        c.scrollTop = c.scrollHeight;
+                        if(c.children.length > 500) c.removeChild(c.firstChild);
+                    }
+                });
+            };
+            ws.onclose = () => setTimeout(connectWS, 3000);
+        }
+
+        // --- SETTINGS & SOURCES ---
+        async function loadConfig() {
+            const res = await fetch('/api/config');
+            const cfg = await res.json();
+            
+            // Fill basic fields
+            for (let key in cfg) {
+                const el = document.querySelector(`[name="${key}"]`);
+                if (el && key !== 'SOURCES') el.value = cfg[key];
+            }
+            
+            // Fill Source Table
+            const tbody = document.getElementById('source-table-body');
+            tbody.innerHTML = (cfg.SOURCES || []).map(s => createSourceRow(s)).join('');
+            
+            // Fill Crawler Checklist
+            const checklist = document.getElementById('crawler-source-list');
+            checklist.innerHTML = (cfg.SOURCES || []).map(s => `
+                <label style="display:flex; align-items:center; gap:10px; padding:10px; background:rgba(255,255,255,0.05); border-radius:6px; cursor:pointer;">
+                    <input type="checkbox" value="${s.id}" class="source-checkbox">
+                    <div>
+                        <div style="font-weight:600;">${s.name}</div>
+                        <div style="font-size:11px; color:var(--text-muted);">${s.subject}</div>
+                    </div>
+                </label>
+            `).join('');
+        }
+
+        function createSourceRow(s = {id:'', name:'', url:'', subject:''}) {
+            const id = s.id || Math.random().toString(36).substr(2, 9);
+            return `
+                <tr data-id="${id}">
+                    <td style="padding:5px;"><input type="text" class="form-control sm source-name" value="${s.name}" placeholder="Tên đề"></td>
+                    <td style="padding:5px;"><input type="text" class="form-control sm source-url" value="${s.url}" placeholder="URL"></td>
+                    <td style="padding:5px;"><input type="text" class="form-control sm source-subject" value="${s.subject}" placeholder="Môn"></td>
+                    <td style="padding:5px;"><button type="button" class="btn btn-danger btn-sm" onclick="this.closest('tr').remove()">🗑️</button></td>
+                </tr>
+            `;
+        }
+
+        function addNewSourceRow() {
+            const tbody = document.getElementById('source-table-body');
+            tbody.insertAdjacentHTML('beforeend', createSourceRow());
+        }
+
+        async function saveSettings() {
+            const form = document.getElementById('settings-form');
+            const formData = new FormData(form);
+            const data = Object.fromEntries(formData.entries());
+            
+            // Collect Sources from table
+            const sources = [];
+            document.querySelectorAll('#source-table-body tr').forEach(tr => {
+                sources.push({
+                    id: tr.dataset.id,
+                    name: tr.querySelector('.source-name').value,
+                    url: tr.querySelector('.source-url').value,
+                    subject: tr.querySelector('.source-subject').value,
+                    enabled: true
+                });
+            });
+            data.SOURCES = sources;
+            data.REQUEST_DELAY = parseInt(data.REQUEST_DELAY);
+            data.PAGE_TIMEOUT = parseInt(data.PAGE_TIMEOUT);
+            
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(data)
+                });
+                if (res.ok) {
+                    alert("✅ Saved! Restarting UI...");
+                    loadConfig();
+                }
+            } catch (err) { alert(err); }
+        }
+
+        document.getElementById('settings-form').onsubmit = (e) => {
+            e.preventDefault();
+            saveSettings();
+        };
+
+        // --- CRAWLER ---
+        async function startCrawler() {
+            const selectedIds = Array.from(document.querySelectorAll('.source-checkbox:checked')).map(cb => cb.value);
+            if (selectedIds.length === 0) return alert("Vui lòng chọn ít nhất 1 nguồn để cào!");
+            
+            document.getElementById('crawler-console').innerHTML = '<div class="log-line log-info">🚀 Đang khởi động Robot...</div>';
+            await fetch('/api/start', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ source_ids: selectedIds })
+            });
+        }
+
+        async function stopCrawler() {
+            await fetch('/api/stop', { method: 'POST' });
+        }
+
+        // --- AI LAB ENHANCED ---
+        async function startAIClassify() {
+            const subject = document.getElementById('lab-subject-select').value;
+            const sourceId = document.getElementById('lab-source-select').value;
+            if (!subject) return alert("Vui lòng chọn môn!");
+            
+            document.getElementById('lab-progress-area').style.display = 'block';
+            await fetch(`/api/ai/classify/${subject}?source_id=${sourceId}`, { method: 'POST' });
+            pollAIProgress();
+        }
+
+        // --- INIT ---
+        async function refreshAll() {
+            updateStats();
+            loadSubjects();
+            testGroq();
+        }
+
+        async function init() {
+            connectWS();
+            pollStatus();
+            refreshAll();
+            loadConfig();
+
+            // Kiểm tra kết quả AI cũ - Thử lại nhiều lần nếu cần
+            const checkAI = async () => {
+                try {
+                    const res = await fetch('/api/ai/clean/results');
+                    const data = await res.json();
+                    if (data.results) {
+                        const btn = document.getElementById('btn-view-ai-results');
+                        if (btn) btn.style.display = 'inline-block';
+                    }
+                } catch(e) {}
+            };
+            checkAI();
+            setTimeout(checkAI, 2000); // Check lại sau 2s cho chắc
+        }
+        init();
+    </script>
+</body>
+</html>
