@@ -82,15 +82,31 @@ def generate_quiz_data(data, subject, filename="data.js"):
                     if match: quiz_dict = json.loads(match.group(1))
             except: pass
         
-        # Merge logic: update existing or add new
+        # Merge logic: Use att_id as key for perfect deduplication
         existing = quiz_dict.get(subject, [])
-        existing_map = {q["img"]: q for q in existing}
+        # Map existing by att_id if available, otherwise by img path
+        existing_map = {}
+        for q in existing:
+            key = q.get("att_id") or q.get("img")
+            existing_map[key] = q
         
         for new_q in data:
-            existing_map[new_q["img"]] = new_q
+            key = new_q.get("att_id") or new_q.get("img")
+            # Nếu đã có và câu mới là "?" trong khi câu cũ đã có đáp án -> Giữ câu cũ
+            if key in existing_map and new_q["ans"] == "?" and existing_map[key]["ans"] != "?":
+                # Cập nhật các trường khác nếu cần (như source_id) nhưng giữ ans
+                existing_map[key].update({k: v for k, v in new_q.items() if v != "?"})
+            else:
+                if key in existing_map:
+                    existing_map[key].update(new_q)
+                else:
+                    existing_map[key] = new_q
             
         quiz_dict[subject] = list(existing_map.values())
         
+        # Sắp xếp lại để dễ nhìn (tùy chọn)
+        quiz_dict[subject].sort(key=lambda x: x.get("att_id", ""))
+
         with open(filename, "w", encoding="utf-8") as f:
             f.write("const quizData = " + json.dumps(quiz_dict, ensure_ascii=False) + ";")
         print(f"\n ✅ Đã cập nhật dữ liệu môn: {subject}")
@@ -98,6 +114,23 @@ def generate_quiz_data(data, subject, filename="data.js"):
         print(f"\n ❌ Lỗi lưu dữ liệu: {e}")
 
 def run_scraper(target_url, subject_name, source_id, images_dir="images"):
+    # Đọc dữ liệu cũ để đối soát
+    existing_data = []
+    if os.path.exists("data.js"):
+        try:
+            with open("data.js", "r", encoding="utf-8") as f:
+                content = f.read()
+                match = re.search(r"const\s+quizData\s*=\s*(.*);", content, re.DOTALL)
+                if match:
+                    full_data = json.loads(match.group(1))
+                    existing_data = full_data.get(subject_name, [])
+        except: pass
+
+    # Map để tìm nhanh: att_id -> item
+    existing_map = {str(q.get("att_id")): q for q in existing_data if q.get("att_id")}
+    # Map phụ: img_path -> item (cho các câu cũ chưa có att_id)
+    img_map = {q.get("img"): q for q in existing_data if not q.get("att_id")}
+
     Path(images_dir).mkdir(exist_ok=True)
     driver = create_driver()
     login(driver)
@@ -122,29 +155,65 @@ def run_scraper(target_url, subject_name, source_id, images_dir="images"):
         att_h = a.get("href")
         side_href = a.get("data-lb-sidebar-href", att_h)
         
-        safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', source_id)
-        img_n = f"{safe_slug}_q{str(i).zfill(3)}.webp"
+        # Extract Attachment ID (e.g. /attachments/abc.12345/ -> 12345)
+        att_id_match = re.search(r"\.(\d+)/?$", att_h) or re.search(r"/(\d+)/?$", att_h)
+        att_id = att_id_match.group(1) if att_id_match else f"unknown_{i}"
+        
+        img_n = f"att_{att_id}.webp"
         img_p = os.path.join(images_dir, img_n)
         
-        # Download image
-        if not os.path.exists(img_p):
+        # --- SMART SYNC LOGIC ---
+        existing_item = existing_map.get(att_id)
+        
+        # 1. Check if we can skip download
+        skip_download = os.path.exists(img_p)
+        
+        # 2. Check if we can skip answer fetching (Slow part)
+        # Bỏ qua nếu đã có đáp án chuẩn HOẶC đã được Audited
+        skip_ans = False
+        current_ans = "?"
+        if existing_item:
+            current_ans = existing_item.get("ans", "?")
+            if current_ans != "?" or existing_item.get("is_audited"):
+                skip_ans = True
+
+        # Action: Download if missing
+        if not skip_download:
             try:
                 full_img_url = (BASE_URL + att_h if att_h.startswith("/") else att_h)
                 if "?" not in full_img_url: full_img_url += "?full=1"
                 r = session.get(full_img_url, timeout=20)
                 if len(r.content) > 1000:
                     with open(img_p, "wb") as f: f.write(r.content)
+                    print(f"  📥 Downloaded: {img_n}")
             except: pass
         
-        ans = get_ans_via_driver(driver, side_href)
+        # Action: Get answer if missing
+        ans = current_ans
+        if not skip_ans:
+            ans = get_ans_via_driver(driver, side_href)
+            print(f"  🔎 Scanned Ans: {ans}")
         
-        final_data.append({
+        # Action: Reuse existing data properties (ID, OCR, etc.)
+        new_item = {
+            "id": existing_item.get("id") if existing_item else None, # Keep old ID
+            "att_id": att_id,
             "img": img_p,
             "ans": ans,
-            "type": "MCQ",
-            "source_id": source_id
-        })
-        print(f"  💡 Câu {i}/{len(links)}. [Ảnh: {img_n}] -> Đáp án: {ans}", end="\r", flush=True)
+            "type": existing_item.get("type", "MCQ") if existing_item else "MCQ",
+            "source_id": source_id,
+            "is_audited": existing_item.get("is_audited", False) if existing_item else False
+        }
+        
+        # Carry over AI results if exist
+        if existing_item:
+            for key in ["questionText", "aiAns"]:
+                if existing_item.get(key): new_item[key] = existing_item[key]
+
+        final_data.append(new_item)
+        
+        status = "REUSED" if skip_ans and skip_download else "SYNCED"
+        print(f"  ✨ [{status}] Câu {i}/{len(links)}. ID: {att_id} -> Ans: {ans}", end="\r", flush=True)
 
     generate_quiz_data(final_data, subject_name)
     driver.quit()

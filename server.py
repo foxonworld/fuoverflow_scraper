@@ -4,6 +4,7 @@ import os
 import subprocess
 import time
 import psutil  # Dùng để quản lý process tree
+import shutil
 from datetime import datetime
 from typing import Optional, List
 
@@ -57,6 +58,7 @@ app = FastAPI(title="FuOverflow Scraper Dashboard")
 
 # Khóa để tránh race condition khi nhấn Start nhiều lần
 start_lock = asyncio.Lock()
+workflow_lock = asyncio.Lock()
 
 # Các route phục vụ file HTML trực tiếp
 @app.get("/")
@@ -112,22 +114,41 @@ def get_quiz_data():
     DATA_FILE = "data.js"
     if not os.path.exists(DATA_FILE):
         return {}
-    try:
-        with open(DATA_FILE, "r", encoding="utf-8") as f:
-            content = f.read().strip()
-            # More robust removal of variable assignment
-            if "quizData =" in content:
-                json_str = content.split("quizData =", 1)[1].strip()
-                if json_str.endswith(";"):
-                    json_str = json_str[:-1]
-                return json.loads(json_str)
-    except Exception as e:
-        print(f"Error reading data.js: {e}")
+    
+    # Retry mechanism to handle concurrent writes
+    for attempt in range(5):
+        try:
+            with open(DATA_FILE, "r", encoding="utf-8") as f:
+                content = f.read().strip()
+                if "quizData =" in content:
+                    json_str = content.split("quizData =", 1)[1].strip()
+                    if json_str.endswith(";"):
+                        json_str = json_str[:-1]
+                    return json.loads(json_str)
+        except (json.JSONDecodeError, IndexError) as e:
+            if attempt == 4: print(f"Error reading data.js after 5 attempts: {e}")
+            time.sleep(0.5) # Wait for other process to finish writing
+        except Exception as e:
+            print(f"Unexpected error reading data.js: {e}")
+            break
     return {}
 
 def save_quiz_data(data):
-    with open("data.js", "w", encoding="utf-8") as f:
-        f.write(f"const quizData = {json.dumps(data, ensure_ascii=False)};")
+    # Atomic write to prevent corruption
+    tmp_file = "data.js.tmp"
+    try:
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            f.write(f"const quizData = {json.dumps(data, ensure_ascii=False)};")
+        
+        # Replace the original file with the new one atomically
+        if os.path.exists("data.js"):
+            os.replace(tmp_file, "data.js")
+        else:
+            os.rename(tmp_file, "data.js")
+    except Exception as e:
+        print(f"Error saving data.js: {e}")
+        if os.path.exists(tmp_file):
+            os.remove(tmp_file)
 
 @app.get("/api/data/subjects")
 async def list_subjects():
@@ -175,7 +196,7 @@ async def get_subject_data(name: str, page: int = 1, limit: int = 12, filter_typ
     import uuid
     id_changed = False
     for q in questions:
-        if not q.get("id"):
+        if isinstance(q, dict) and not q.get("id"):
             q["id"] = str(uuid.uuid4())[:8]
             id_changed = True
     if id_changed:
@@ -226,6 +247,13 @@ async def delete_quiz_item(name: str, item_id: str):
     if len(new_list) < len(data[name]):
         data[name] = new_list
         save_quiz_data(data)
+        
+        # Cập nhật kết quả AI: Loại bỏ ID vừa xóa khỏi danh sách trùng lặp
+        if state.ai_results:
+            target_id = str(item_id)
+            state.ai_results['exact'] = [p for p in state.ai_results.get('exact', []) if str(p[0]) != target_id and str(p[1]) != target_id]
+            state.ai_results['fuzzy'] = [p for p in state.ai_results.get('fuzzy', []) if str(p[0]) != target_id and str(p[1]) != target_id]
+            
         return {"message": "Deleted successfully"}
     
     raise HTTPException(status_code=400, detail="Item not found or already deleted")
@@ -258,21 +286,14 @@ async def export_clean_v2(name: str):
     if name not in data:
         raise HTTPException(status_code=404, detail="Subject not found")
         
-    # Thu thập tất cả các ID của câu trùng lặp
+    # Thu thập tất cả các ID của câu trùng lặp (target IDs)
     results = state.ai_results
-    dupe_indices = set()
+    dupe_ids = set()
     for pair in (results.get('exact', []) + results.get('fuzzy', [])):
-        dupe_indices.add(pair[1])
+        dupe_ids.add(str(pair[1]))
         
-    # Tạo danh sách mới và đảm bảo mỗi câu có ID duy nhất
-    import uuid
-    clean_questions = []
-    for i, q in enumerate(data[name]):
-        if i not in dupe_indices:
-            new_q = q.copy()
-            if not new_q.get("id"):
-                new_q["id"] = str(uuid.uuid4())[:8]
-            clean_questions.append(new_q)
+    # Tạo danh sách mới lọc bỏ các ID trùng lặp
+    clean_questions = [q for q in data[name] if str(q.get("id")) not in dupe_ids]
             
     new_name = f"{name}_v2"
     data[new_name] = clean_questions
@@ -286,28 +307,35 @@ async def bulk_delete_quiz_items(name: str, ids: List[str]):
     if name not in data:
         raise HTTPException(status_code=404, detail="Subject not found")
     
-    # Lọc bỏ các câu có ID nằm trong danh sách cần xóa
+    # Lọc bỏ các câu có ID nằm trong danh sách cần xóa (chỉ xử lý các câu là dict)
     original_count = len(data[name])
-    data[name] = [q for q in data[name] if str(q.get("id")) not in [str(i) for i in ids]]
+    data[name] = [q for q in data[name] if not isinstance(q, dict) or str(q.get("id")) not in [str(i) for i in ids]]
     deleted_count = original_count - len(data[name])
             
     save_quiz_data(data)
+    
+    # Cập nhật kết quả AI: Loại bỏ danh sách ID vừa xóa khỏi kết quả trùng lặp
+    if state.ai_results:
+        id_strings = [str(i) for i in ids]
+        state.ai_results['exact'] = [p for p in state.ai_results.get('exact', []) if str(p[0]) not in id_strings and str(p[1]) not in id_strings]
+        state.ai_results['fuzzy'] = [p for p in state.ai_results.get('fuzzy', []) if str(p[0]) not in id_strings and str(p[1]) not in id_strings]
+            
     return {"message": f"Deleted {deleted_count} items", "count": deleted_count}
 
-@app.patch("/api/data/subjects/{name}/items/{index}")
-async def update_quiz_item(name: str, index: int, update_data: dict):
+@app.patch("/api/data/subjects/{name}/items/{item_id}")
+async def update_quiz_item(name: str, item_id: str, update_data: dict):
     data = get_quiz_data()
     if name not in data:
         raise HTTPException(status_code=404, detail="Subject not found")
     
-    if 0 <= index < len(data[name]):
-        # Cập nhật các trường được gửi lên
-        for key, value in update_data.items():
-            data[name][index][key] = value
-        save_quiz_data(data)
-        return {"message": "Updated successfully"}
+    for q in data[name]:
+        if isinstance(q, dict) and str(q.get("id")) == item_id:
+            for key, value in update_data.items():
+                q[key] = value
+            save_quiz_data(data)
+            return {"message": "Updated successfully"}
     
-    raise HTTPException(status_code=400, detail="Invalid index")
+    raise HTTPException(status_code=400, detail="Item not found")
 
 @app.get("/api/data/stats")
 async def get_system_stats():
@@ -319,9 +347,12 @@ async def get_system_stats():
     ans_dist = {"A": 0, "B": 0, "C": 0, "D": 0, "Other": 0}
     for qs in data.values():
         for q in qs:
-            ans = q.get("ans", "Other").upper()
-            if ans in ans_dist: ans_dist[ans] += 1
-            else: ans_dist["Other"] += 1
+            if isinstance(q, dict):
+                ans = q.get("ans", "Other")
+                if not isinstance(ans, str): ans = "Other"
+                ans = ans.upper()
+                if ans in ans_dist: ans_dist[ans] += 1
+                else: ans_dist["Other"] += 1
             
     return {
         "total_subjects": total_subjects,
@@ -447,9 +478,11 @@ async def audit_thread_worker(subject_name, urls):
                         has_conflict = True
                 
                 old_ans = questions[q_idx]["ans"]
+                q_id = questions[q_idx].get("id")
+                
                 if old_ans != suggested or has_conflict:
                     diff_results.append({
-                        "index": q_idx,
+                        "id": q_id,
                         "img": questions[q_idx]["img"],
                         "old_ans": old_ans,
                         "suggested": suggested,
@@ -463,6 +496,7 @@ async def audit_thread_worker(subject_name, urls):
         final_msg = f"✅ Đối soát xong! Tìm thấy {len(diff_results)} câu cần xem xét."
         print(f"\n[AUDIT] {final_msg}")
         await broadcast_log(final_msg)
+        save_draft(subject_name, "audit", diff_results)
         
     except Exception as e:
         err_msg = f"❌ Lỗi đối soát: {str(e)}"
@@ -484,24 +518,27 @@ async def start_audit_scan(name: str, req: AuditRequest):
 
 @app.get("/api/audit/subjects/{name}/results")
 async def get_audit_results(name: str):
-    return state.audit_results if hasattr(state, 'audit_results') else None
+    return load_draft(name, "audit") or state.audit_results
 
 @app.post("/api/audit/subjects/{name}/apply")
 async def apply_audit_changes(name: str, changes: dict):
-    # changes: { "index": "new_ans" }
+    create_backup(f"{name}_pre_audit_apply")
     data = get_quiz_data()
     if name not in data:
         raise HTTPException(status_code=404, detail="Subject not found")
     
     updated_count = 0
-    for idx_str, new_ans in changes.items():
-        idx = int(idx_str)
-        if 0 <= idx < len(data[name]):
-            data[name][idx]["ans"] = new_ans
+    id_map = {str(q.get("id")): q for q in data[name] if isinstance(q, dict)}
+    
+    for q_id, new_ans in changes.items():
+        if q_id in id_map:
+            id_map[q_id]["ans"] = new_ans
+            id_map[q_id]["is_audited"] = True # Đánh dấu đã Audit
             updated_count += 1
             
     save_quiz_data(data)
-    state.audit_results = None # Clear results after apply
+    state.audit_results = None 
+    delete_draft(name, "audit") # Xóa bản nháp sau khi đã áp dụng
     return {"message": f"Applied {updated_count} changes successfully"}
 
 # --- Gemini AI Support ---
@@ -773,8 +810,41 @@ class State:
         self.active_websockets: List[WebSocket] = []
         self.ai_results = None
         self.ai_progress = {"current": 0, "total": 0, "status": ""}
+        self.audit_results = None
+        self.workflow_running = False
 
 state = State()
+
+def create_backup(subject_name: str):
+    if not os.path.exists("backups"): os.makedirs("backups")
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    bak_path = f"backups/data_{subject_name}_{ts}.js"
+    if os.path.exists("data.js"):
+        shutil.copy("data.js", bak_path)
+        # Giữ lại tối đa 20 bản sao lưu gần nhất
+        backups = sorted([os.path.join("backups", f) for f in os.listdir("backups") if f.endswith(".js")], key=os.path.getctime)
+        if len(backups) > 20:
+            os.remove(backups[0])
+        return bak_path
+    return None
+
+def save_draft(subject: str, tool_type: str, data: dict):
+    if not os.path.exists("drafts"): os.makedirs("drafts")
+    path = f"drafts/{subject}_{tool_type}.json"
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+def load_draft(subject: str, tool_type: str):
+    path = f"drafts/{subject}_{tool_type}.json"
+    if os.path.exists(path):
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    return None
+
+def delete_draft(subject: str, tool_type: str):
+    path = f"drafts/{subject}_{tool_type}.json"
+    if os.path.exists(path):
+        os.remove(path)
 
 # Models với Validation cơ bản
 class SourceModel(BaseModel):
@@ -887,11 +957,15 @@ async def start_scraper(request: dict):
     async with start_lock:
         if state.process and state.process.poll() is None:
             raise HTTPException(status_code=400, detail="Robot is already running")
-
-        source_ids = request.get("source_ids", [])
+        
+        # New check for background tasks (AI Clean, Trash Filter, etc)
+        if getattr(state, 'workflow_running', False):
+            raise HTTPException(status_code=400, detail="System is still processing previous crawl results")
+        options = request.get("options", {})
         config_data = load_config_data()
         all_sources = {s["id"]: s for s in config_data.get("SOURCES", [])}
         
+        source_ids = request.get("source_ids", [])
         selected_sources = [all_sources[sid] for sid in source_ids if sid in all_sources]
         if not selected_sources:
             raise HTTPException(status_code=400, detail="No valid sources selected")
@@ -900,21 +974,41 @@ async def start_scraper(request: dict):
         state.logs = [] # Clear logs
         
         async def run_sequence():
-            for source in selected_sources:
-                cmd = [
-                    "python", "-u", SCRAPER_SCRIPT,
-                    "--url", source["url"],
-                    "--subject", source["subject"],
-                    "--source_id", source["id"]
-                ]
-                await broadcast_log(f"--- STARTING: {source['name']} ---")
-                state.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
-                await read_stream(state.process.stdout)
-                state.process.wait()
-                await broadcast_log(f"--- FINISHED: {source['name']} ---")
-            
-            await broadcast_log("✨ ALL SELECTED SOURCES COMPLETED!")
-            state.process = None
+            state.workflow_running = True
+            try:
+                processed_subjects = set()
+                for source in selected_sources:
+                    cmd = [
+                        "python", "-u", SCRAPER_SCRIPT,
+                        "--url", source["url"],
+                        "--subject", source["subject"],
+                        "--source_id", source["id"]
+                    ]
+                    await broadcast_log(f"--- STARTING: {source['name']} ---")
+                    state.process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, bufsize=0)
+                    await read_stream(state.process.stdout)
+                    state.process.wait()
+                    await broadcast_log(f"--- FINISHED: {source['name']} ---")
+                    processed_subjects.add(source["subject"])
+
+                # After all sources are finished
+                for subject in processed_subjects:
+                    if options.get("ai_lab"):
+                        await broadcast_log(f"🧠 [AI LAB] Starting OCR for {subject}...")
+                        await ai_clean_worker(subject, mode='scan_only_ocr')
+
+                    if options.get("trash_filter"):
+                        await broadcast_log(f"🗑️ [TRASH FILTER] Cleaning up subject: {subject}...")
+                        await trash_filter_worker(subject)
+
+                    if options.get("ai_clean"):
+                        await broadcast_log(f"🪄 [AI CLEAN] Scanning duplicates for {subject}...")
+                        await ai_clean_worker(subject, mode='scan')
+
+                await broadcast_log("✨ ALL SELECTED SOURCES COMPLETED!")
+            finally:
+                state.process = None
+                state.workflow_running = False
 
         asyncio.create_task(run_sequence())
         return {"message": f"Started sequence of {len(selected_sources)} sources"}
@@ -955,13 +1049,88 @@ async def stop_scraper():
     return {"message": "Scraper stopped"}
 
 @app.post("/api/cleanup")
-async def cleanup_data():
+async def cleanup_data_api():
     try:
+        create_backup("global_cleanup")
         # Chạy script cleanup trong process riêng
         subprocess.run(["python", "cleanup_data.py"], check=True)
         return {"message": "Cleanup completed successfully"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/api/drafts")
+async def list_drafts():
+    if not os.path.exists("drafts"): return {"drafts": []}
+    files = os.listdir("drafts")
+    drafts = []
+    for f in files:
+        if f.endswith(".json"):
+            parts = f.replace(".json", "").split("_")
+            if len(parts) >= 2:
+                drafts.append({
+                    "subject": "_".join(parts[:-1]),
+                    "type": parts[-1],
+                    "file": f,
+                    "mtime": os.path.getmtime(os.path.join("drafts", f))
+                })
+    return {"drafts": drafts}
+
+@app.get("/api/drafts/{subject}/{tool_type}")
+async def get_draft(subject: str, tool_type: str):
+    data = load_draft(subject, tool_type)
+    if data: return data
+    raise HTTPException(status_code=404, detail="Draft not found")
+
+@app.delete("/api/drafts/{subject}/{tool_type}")
+async def remove_draft(subject: str, tool_type: str):
+    delete_draft(subject, tool_type)
+    return {"message": "Draft deleted"}
+
+@app.get("/api/backups")
+async def list_backups():
+    if not os.path.exists("backups"): return {"backups": []}
+    files = sorted([f for f in os.listdir("backups") if f.endswith(".js")], key=lambda x: os.path.getctime(os.path.join("backups", x)), reverse=True)
+    return {"backups": files}
+
+@app.post("/api/backups/{filename}/restore")
+async def restore_backup(filename: str):
+    path = os.path.join("backups", filename)
+    if os.path.exists(path):
+        shutil.copy(path, "data.js")
+        return {"message": "Restored successfully"}
+    raise HTTPException(status_code=404, detail="Backup not found")
+
+async def trash_filter_worker(subject_name: str):
+    create_backup(f"{subject_name}_pre_trash")
+    data = get_quiz_data()
+    if subject_name not in data: return
+    
+    questions = data[subject_name]
+    before_count = len(questions)
+    
+    # Lọc: Có ảnh, Ảnh tồn tại, và Đáp án không phải là "?"
+    clean_questions = []
+    removed_count = 0
+    
+    for q in questions:
+        img_path = q.get("img", "")
+        ans = q.get("ans", "")
+        
+        # Điều kiện giữ lại:
+        # 1. Có đường dẫn ảnh
+        # 2. File ảnh tồn tại trên đĩa
+        # 3. Đáp án khác "?" và không rỗng
+        if img_path and os.path.exists(img_path) and ans and ans != "?":
+            clean_questions.append(q)
+        else:
+            removed_count += 1
+            
+    if removed_count > 0:
+        data[subject_name] = clean_questions
+        save_quiz_data(data)
+        await broadcast_log(f"🗑️ Trash Filter: Removed {removed_count} invalid items from {subject_name}")
+    else:
+        await broadcast_log(f"✅ Trash Filter: Subject {subject_name} is already clean.")
 
 # --- AI Clean Logic ---
 @app.get("/api/ai/clean/results")
@@ -994,9 +1163,20 @@ async def start_ai_clean_test(name: str):
 async def ai_clean_worker(subject_name: str, limit: int = None, mode: str = 'scan'):
     try:
         import hashlib
+        import uuid
         config = load_config_data()
         data = get_quiz_data()
         all_questions = data.get(subject_name, [])
+        
+        # Ensure ALL questions in subject have IDs first
+        id_changed = False
+        for q in all_questions:
+            if isinstance(q, dict) and not q.get("id"):
+                q["id"] = str(uuid.uuid4())[:8]
+                id_changed = True
+        if id_changed:
+            save_quiz_data(data)
+
         # Nếu có limit (Quick Test), chỉ lấy số lượng yêu cầu
         questions = all_questions[:limit] if limit else all_questions
         total = len(questions)
@@ -1005,65 +1185,64 @@ async def ai_clean_worker(subject_name: str, limit: int = None, mode: str = 'sca
         
         if mode == 'reanalyze':
             await broadcast_log(f"🔄 AI Clean: Re-analyzing existing data for {subject_name}...")
+        elif mode == 'scan_only_ocr':
+            await broadcast_log(f"📸 AI Lab: Running Phase 1 (OCR) for {subject_name}...")
         else:
             await broadcast_log(f"🚀 AI Clean: Starting Hybrid Scan for {subject_name} ({total} questions)")
         
         # 1. Hashing Check (Chỉ chạy khi scan)
         hashes = {}
         exact_dupes = []
-        if mode != 'reanalyze':
-            for i, q in enumerate(questions):
+
+        if mode == 'scan':
+            for q in questions:
                 img_path = q["img"]
                 if os.path.exists(img_path):
                     with open(img_path, "rb") as f:
                         h = hashlib.md5(f.read()).hexdigest()
                         if h in hashes:
-                            exact_dupes.append((hashes[h], i))
+                            exact_dupes.append((hashes[h], q.get("id"))) # Lưu (ID_gốc, ID_trùng)
                         else:
-                            hashes[h] = i
+                            hashes[h] = q.get("id")
         
-        await broadcast_log(f"✅ Hashing done: Found {len(exact_dupes)} exact image duplicates")
+            await broadcast_log(f"✅ Hashing done: Found {len(exact_dupes)} exact image duplicates")
         
         # 2. Local OCR (Offline - No API limits)
-        if mode != 'reanalyze':
+        if mode in ['scan', 'scan_only_ocr']:
             state.ai_progress["status"] = "Phase 1: Local OCR Scanning..."
             for i in range(total):
                 state.ai_progress["current"] = i
                 q = questions[i]
                 img_path = q["img"]
-                img_name = os.path.basename(img_path)
                 
-                # Chỉ quét nếu chưa có text hoặc force scan
+                # CHỈ QUÉT NẾU CHƯA CÓ TEXT (Bảo toàn công sức cũ)
                 if not q.get("questionText"):
                     if os.path.exists(img_path):
-                        # Hiển thị tên file đang quét để người dùng biết máy đang làm gì
-                        if total < 10 or i % 5 == 0:
+                        if total < 10 or i % 10 == 0:
                             percent = int((i/total)*100)
-                            await broadcast_log(f"📸 OCR [{i}/{total}] {percent}% - Scanning: {img_name}...")
+                            await broadcast_log(f"📸 OCR [{i}/{total}] {percent}% - {os.path.basename(img_path)}")
                         
                         loop = asyncio.get_event_loop()
                         raw_text = await loop.run_in_executor(None, local_ocr_extract, img_path)
                         q["questionText"] = raw_text
                 
-                if i % 10 == 0:
-                    save_quiz_data(data) # Lưu tiến độ thường xuyên
+                if i % 20 == 0:
+                    save_quiz_data(data) # Lưu tiến độ
 
-        # 3. AI Refinement (Batch - Text-only is cheap and high-limit)
-        if mode != 'reanalyze':
+        # 3. AI Refinement (Batch)
+        if mode in ['scan', 'scan_only_ocr']:
             state.ai_progress["status"] = "Phase 2: AI Refinement (Cleaning Text)..."
-            batch_size = 30 if config.get("AI_PROVIDER") == "gemini" else 5
+            batch_size = 20 if config.get("AI_PROVIDER") == "gemini" else 5
             
-            # Chỉ lấy những câu chưa có aiAns (chưa được AI làm sạch)
-            pending_indices = [idx for idx, q in enumerate(questions) if not q.get("aiAns")]
+            # CHỈ LỌC NHỮNG CÂU CHƯA ĐƯỢC AI LÀM SẠCH (Bảo toàn API)
+            pending_indices = [idx for idx, q in enumerate(questions) if not q.get("aiAns") and q.get("questionText")]
             
-            if not pending_indices:
-                await broadcast_log("⏩ All questions already have AI Refinement. Skipping Phase 2.")
-            else:
+            if pending_indices:
                 for i in range(0, len(pending_indices), batch_size):
                     chunk = pending_indices[i : i + batch_size]
                     batch_texts = [questions[idx].get("questionText", "") for idx in chunk]
                     
-                    state.ai_progress["current"] = questions.index(questions[chunk[0]]) # Update progress UI
+                    state.ai_progress["current"] = questions.index(questions[chunk[0]])
                     
                     refine_prompt = "Fix OCR errors, remove UI noise. Return JSON: [{'questionText': 'text', 'aiAns': 'ans'}]. Data: " + json.dumps(batch_texts)
 
@@ -1077,8 +1256,11 @@ async def ai_clean_worker(subject_name: str, limit: int = None, mode: str = 'sca
                             questions[idx]["aiAns"] = res.get("aiAns", "")
                     
                     save_quiz_data(data)
-                    # Nghỉ ngắn để tránh bị khóa API (Rate Limit)
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1)
+
+        if mode == 'scan_only_ocr':
+            await broadcast_log(f"✅ AI Lab OCR finished for {subject_name}")
+            return
 
         await broadcast_log("✨ OCR & AI Refinement Complete! Starting Duplicate Analysis...")
         
@@ -1101,31 +1283,35 @@ async def ai_clean_worker(subject_name: str, limit: int = None, mode: str = 'sca
             return " ".join(text.split())
 
         text_dupes = []
+        dupe_ids = [d[1] for d in exact_dupes]
         for i in range(total):
-            # Bỏ qua nếu là bản sao tuyệt đối (đã xử lý ở bước Hash)
-            if i in [d[1] for d in exact_dupes]: continue
+            id_i = questions[i].get("id")
+            if id_i in dupe_ids: continue
             
             t1 = normalize_text(questions[i].get("questionText", ""))
-            if len(t1) < 10: continue # Câu quá ngắn bỏ qua
+            if len(t1) < 10: continue 
             
             for j in range(i + 1, total):
-                if j in [d[1] for d in exact_dupes]: continue
+                id_j = questions[j].get("id")
+                if id_j in dupe_ids: continue
                 
                 t2 = normalize_text(questions[j].get("questionText", ""))
                 if not t2: continue
                 
-                # So sánh độ tương đồng
                 ratio = SequenceMatcher(None, t1, t2).ratio()
-                if ratio > 0.85: # Độ tương đồng trên 85%
-                    text_dupes.append((i, j))
+                if ratio > 0.85:
+                    text_dupes.append((id_i, id_j)) # Lưu (ID_gốc, ID_trùng)
 
         state.ai_results = {
             "exact": exact_dupes,
             "fuzzy": text_dupes,
             "total_scanned": total
         }
+        # LƯU BẢN NHÁP (Draft)
+        save_draft(subject_name, "clean", state.ai_results)
+        
         state.ai_progress["status"] = "Scan Complete"
-        save_quiz_data(data) # Save enriched text
+        save_quiz_data(data)
         await broadcast_log(f"✨ AI Clean Finished! Found {len(exact_dupes) + len(text_dupes)} potential duplicates.")
         
     except Exception as e:

@@ -300,8 +300,32 @@
             <!-- OVERVIEW SCREEN -->
             <div id="screen-overview" class="screen active">
                 <div class="hud-grid">
-                    <div class="hud-item"><div class="hud-val" id="hud-subjects">-</div><div class="hud-label">Total Subjects</div></div>
-                    <div class="hud-item"><div class="hud-val" id="hud-questions">-</div><div class="hud-label">Total Questions</div></div>
+                    <div class="hud-item">
+                        <div class="hud-val" id="hud-subjects">-</div>
+                        <div class="hud-label">Subjects</div>
+                    </div>
+                    <div class="hud-item">
+                        <div class="hud-val" id="hud-questions">-</div>
+                        <div class="hud-label">Total Questions</div>
+                    </div>
+                    <div class="hud-item">
+                        <div class="hud-val" id="hud-images">-</div>
+                        <div class="hud-label">Images Processed</div>
+                    </div>
+                </div>
+
+                <!-- NEW: Pending Tasks Widget -->
+                <div id="pending-tasks-container" style="display: none; margin-bottom: 40px;">
+                    <h3 style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+                        📋 Công việc đang dở (Pending Tasks)
+                        <span class="badge" style="background: var(--danger); color: #fff;">! Action Required</span>
+                    </h3>
+                    <div id="pending-tasks-list" class="grid">
+                        <!-- Draft items will be injected here -->
+                    </div>
+                </div>
+
+                <div class="card">
                     <div class="hud-item"><div class="hud-val" id="hud-accuracy">-</div><div class="hud-label">Ans A Dist.</div></div>
                 </div>
                 <div class="card">
@@ -335,6 +359,23 @@
                             <button id="btn-crawler-start" class="btn btn-primary" onclick="startCrawler()">▶️ Start Selected</button>
                             <button id="btn-crawler-stop" class="btn btn-danger" onclick="stopCrawler()" disabled>⏹️ Stop</button>
                         </div>
+                    </div>
+                </div>
+
+                <div class="card" style="margin-bottom: 25px;">
+                    <div style="display: flex; gap: 30px; align-items: center;">
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px;">
+                            <input type="checkbox" id="opt-auditor" checked> 🛡️ Answer Auditor
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px;">
+                            <input type="checkbox" id="opt-ai-lab" checked> 🧠 AI Lab OCR
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px;">
+                            <input type="checkbox" id="opt-ai-clean" checked> 🪄 AI Clean
+                        </label>
+                        <label style="display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px;">
+                            <input type="checkbox" id="opt-trash-filter" checked> 🗑️ Trash Filter
+                        </label>
                     </div>
                 </div>
                 
@@ -472,6 +513,14 @@
                         </div>
                     </div>
                 </form>
+                
+                <div class="card" style="margin-top: 30px;">
+                    <h3>📂 Quản lý Sao lưu (Backups)</h3>
+                    <p style="font-size: 13px; color: var(--text-muted);">Các bản sao lưu được tạo tự động trước khi thực hiện thao tác xóa dữ liệu.</p>
+                    <div id="backup-list" style="margin-top: 20px; display: flex; flex-direction: column; gap: 10px;">
+                        <div style="text-align: center; color: var(--text-muted);">Đang tải danh sách...</div>
+                    </div>
+                </div>
             </div>
 
         </div>
@@ -501,7 +550,7 @@
                 <div style="display:flex; gap:15px;">
                     <button class="btn btn-secondary btn-sm" onclick="exportV2()">📦 Xuất bản Copy sạch (v2)</button>
                     <button class="btn btn-danger btn-sm" id="btn-delete-all-shown" onclick="resolveBulkDupes()">🗑️ Xóa tất cả đang hiển thị</button>
-                    <button class="btn btn-secondary" onclick="document.getElementById('ai-review-modal').classList.remove('active')">Close</button>
+                    <button class="btn btn-secondary" onclick="closeAIReview()">Close & Next</button>
                 </div>
             </div>
             <div class="modal-body">
@@ -511,6 +560,26 @@
                     <div class="filter-tab" onclick="filterReview('diff', this)">Khác đáp án</div>
                 </div>
                 <div id="ai-review-container"></div>
+            </div>
+        </div>
+    </div>
+
+    <div id="audit-review-modal" class="modal-overlay">
+        <div class="modal">
+            <div class="modal-header">
+                <div>
+                    <h2 style="margin:0;">🛡️ Answer Auditor Review</h2>
+                    <p id="audit-review-status" style="font-size:12px; color:var(--text-muted); margin-top:5px;"></p>
+                </div>
+                <div style="display:flex; gap:15px;">
+                    <button class="btn btn-primary" onclick="applyAuditChanges()">💾 Save & Continue</button>
+                    <button class="btn btn-secondary" onclick="skipAuditor()">⏭️ Skip</button>
+                </div>
+            </div>
+            <div class="modal-body">
+                <div id="audit-results-container">
+                    <!-- Results injected by JS -->
+                </div>
             </div>
         </div>
     </div>
@@ -662,11 +731,11 @@
                             <img src="/static/${item.img}" onerror="this.src='https://placehold.co/200x150?text=Loi+Anh'">
                         </div>
                         <div style="display:flex; justify-content:space-between; align-items:center; margin-top:10px;">
-                            <span style="font-size:10px; color:var(--text-muted);">${item.source_id || 'Legacy'} #${item.original_index}</span>
+                            <span style="font-size:10px; color:var(--text-muted);">${item.source_id || 'Legacy'} #${item.id}</span>
                             <div style="display:flex; gap:5px;">
                                 <span class="badge ${item.type === 'TF' ? 'badge-tf' : 'badge-mcq'}">${item.type || 'MCQ'}</span>
-                                <span style="background:var(--accent); color:#000; padding:2px 8px; border-radius:4px; font-weight:bold; cursor:pointer;" onclick="cycleAnswer('${currentSubject}', ${item.original_index}, '${item.ans}')">${item.ans || '?'}</span>
-                                <button style="background:none; border:none; color:var(--text-muted); cursor:pointer;" onclick="deleteItem(${item.original_index})">🗑️</button>
+                                <span style="background:var(--accent); color:#000; padding:2px 8px; border-radius:4px; font-weight:bold; cursor:pointer;" onclick="cycleAnswer('${currentSubject}', '${item.id}', '${item.ans}')">${item.ans || '?'}</span>
+                                <button style="background:none; border:none; color:var(--text-muted); cursor:pointer;" onclick="deleteItem('${item.id}')">🗑️</button>
                             </div>
                         </div>
                     </div>
@@ -681,10 +750,10 @@
             } catch (err) {}
         }
 
-        async function cycleAnswer(name, index, currentAns) {
-            const nextMap = { 'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A', '': 'A' };
+        async function cycleAnswer(name, id, currentAns) {
+            const nextMap = { 'A': 'B', 'B': 'C', 'C': 'D', 'D': 'A', 'TF': 'A', '': 'A' };
             const nextAns = nextMap[currentAns.toUpperCase()] || 'A';
-            await fetch(`/api/data/subjects/${name}/items/${index}`, {
+            await fetch(`/api/data/subjects/${name}/items/${id}`, {
                 method: 'PATCH',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ ans: nextAns })
@@ -692,9 +761,9 @@
             loadSubjectData(currentPage);
         }
 
-        async function deleteItem(index) {
+        async function deleteItem(id) {
             if(!confirm("Xóa câu hỏi này?")) return;
-            await fetch(`/api/data/subjects/${currentSubject}/items/${index}`, { method: 'DELETE' });
+            await fetch(`/api/data/subjects/${currentSubject}/items/${id}`, { method: 'DELETE' });
             loadSubjectData(currentPage);
         }
 
@@ -800,7 +869,9 @@
         let currentDuplicates = [];
         let currentFilter = 'all';
 
-        async function showAIResults() {
+        async function showAIResults(subject) {
+            if (subject) document.getElementById('lab-subject-select').value = subject;
+            
             const modal = document.getElementById('ai-review-modal');
             const container = document.getElementById('ai-review-container');
             modal.classList.add('active');
@@ -809,9 +880,9 @@
             const res = await fetch('/api/ai/clean/results');
             const data = await res.json();
             const results = data.results;
-            const subject = document.getElementById('lab-subject-select').value;
+            const targetSubject = subject || document.getElementById('lab-subject-select').value;
             
-            const qRes = await fetch(`/api/data/subjects/${subject}?limit=2000`);
+            const qRes = await fetch(`/api/data/subjects/${targetSubject}?limit=2000`);
             const qData = await qRes.json();
             const questions = qData.items;
             
@@ -819,12 +890,10 @@
             currentDuplicates = [];
             const dupes = [...(results.exact || []), ...(results.fuzzy || [])];
             dupes.forEach(pair => {
-                const q1 = questions[pair[0]];
-                const q2 = questions[pair[1]];
+                const q1 = questions.find(q => q.id == pair[0]);
+                const q2 = questions.find(q => q.id == pair[1]);
                 if (q1 && q2) {
                     currentDuplicates.push({
-                        masterIdx: pair[0],
-                        dupeIdx: pair[1],
                         masterId: q1.id,
                         dupeId: q2.id,
                         masterImg: q1.img,
@@ -865,14 +934,14 @@
                 <div class="card" style="margin-bottom:20px; border-left: 4px solid ${d.isSame ? 'var(--success)' : 'var(--danger)'}; position:relative;">
                     <div class="grid" style="grid-template-columns: 1fr 1fr; gap: 15px;">
                         <div>
-                            <div style="font-size:11px; margin-bottom:5px;">Master (#${d.masterIdx})</div>
+                            <div style="font-size:11px; margin-bottom:5px; color:var(--text-muted);">Master ID: <span style="color:var(--primary);">${d.masterId}</span></div>
                             <div class="subject-img-preview" onclick="previewImage('/static/${d.masterImg}')">
                                 <img src="/static/${d.masterImg}">
                                 <div class="ans-badge">Đáp án: ${d.masterAns}</div>
                             </div>
                         </div>
                         <div>
-                            <div style="font-size:11px; margin-bottom:5px;">Duplicate (#${d.dupeIdx})</div>
+                            <div style="font-size:11px; margin-bottom:5px; color:var(--text-muted);">Duplicate ID: <span style="color:var(--secondary);">${d.dupeId}</span></div>
                             <div class="subject-img-preview" onclick="previewImage('/static/${d.dupeImg}')">
                                 <img src="/static/${d.dupeImg}">
                                 <div class="ans-badge">Đáp án: ${d.dupeAns}</div>
@@ -880,7 +949,7 @@
                         </div>
                     </div>
                     <div style="margin-top:15px; display:flex; justify-content:center;">
-                        <button class="btn btn-primary btn-sm" onclick="resolveDupe('${subject}', '${d.dupeId}')">Xóa câu trùng (#${d.dupeIdx})</button>
+                        <button class="btn btn-primary btn-sm" onclick="resolveDupe('${subject}', '${d.dupeId}')">Xóa câu trùng này</button>
                     </div>
                 </div>
             `).join('');
@@ -995,6 +1064,11 @@
                         if(c.children.length > 500) c.removeChild(c.firstChild);
                     }
                 });
+
+                // Detect workflow completion
+                if (e.data.includes('✨ ALL SELECTED SOURCES COMPLETED!')) {
+                    handleCrawlCompletion();
+                }
             };
             ws.onclose = () => setTimeout(connectWS, 3000);
         }
@@ -1082,17 +1156,50 @@
             saveSettings();
         };
 
-        // --- CRAWLER ---
+        // --- CRAWLER CONTROL ---
+        let crawlerWorkflow = {
+            subjects: [],
+            options: {}
+        };
+
         async function startCrawler() {
             const selectedIds = Array.from(document.querySelectorAll('.source-checkbox:checked')).map(cb => cb.value);
             if (selectedIds.length === 0) return alert("Vui lòng chọn ít nhất 1 nguồn để cào!");
             
-            document.getElementById('crawler-console').innerHTML = '<div class="log-line log-info">🚀 Đang khởi động Robot...</div>';
-            await fetch('/api/start', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ source_ids: selectedIds })
+            const options = {
+                auditor: document.getElementById('opt-auditor').checked,
+                ai_lab: document.getElementById('opt-ai-lab').checked,
+                ai_clean: document.getElementById('opt-ai-clean').checked,
+                trash_filter: document.getElementById('opt-trash-filter').checked
+            };
+
+            // Collect all subjects from selected sources
+            const config = await (await fetch('/api/config')).json();
+            const subjects = new Set();
+            selectedIds.forEach(id => {
+                const s = config.SOURCES.find(src => src.id === id);
+                if (s) subjects.add(s.subject);
             });
+            
+            crawlerWorkflow.subjects = Array.from(subjects);
+            crawlerWorkflow.options = options;
+
+            document.getElementById('crawler-console').innerHTML = '<div class="log-line log-info">🚀 Đang khởi động Robot...</div>';
+            
+            try {
+                const res = await fetch('/api/start', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ 
+                        source_ids: selectedIds,
+                        options: options
+                    })
+                });
+                if (res.ok) {
+                    document.getElementById('btn-crawler-start').disabled = true;
+                    document.getElementById('btn-crawler-stop').disabled = false;
+                }
+            } catch (err) { alert(err); }
         }
 
         async function stopCrawler() {
@@ -1110,11 +1217,221 @@
             pollAIProgress();
         }
 
+        async function showAuditResults(subject) {
+            crawlerWorkflow.currentReviewSubject = subject;
+            
+            const modal = document.getElementById('audit-review-modal');
+            const container = document.getElementById('audit-results-container');
+            const status = document.getElementById('audit-review-status');
+            modal.classList.add('active');
+            container.innerHTML = '<div style="text-align:center; padding:50px;">⏳ Đang kiểm tra bản nháp hoặc quét dữ liệu mới...</div>';
+
+            // Check if results already exist in draft/memory
+            const res = await fetch(`/api/audit/subjects/${subject}/results`);
+            const results = await res.json();
+            
+            if (results && results.length > 0) {
+                renderAuditList(subject, results);
+            } else {
+                // If no results, start a new scan
+                const resScan = await fetch(`/api/audit/subjects/${subject}/scan`, { method: 'POST' });
+                if (resScan.ok) {
+                    status.innerHTML = '<span class="status-dot dot-running"></span> Đang cào comment...';
+                    pollAuditStatus(subject);
+                }
+            }
+        }
+
+        async function handleCrawlCompletion() {
+            if (crawlerWorkflow.subjects.length === 0) {
+                alert("✅ Toàn bộ quy trình cào và xử lý đã hoàn tất!");
+                return;
+            }
+
+            const currentSub = crawlerWorkflow.subjects[0];
+            
+            if (crawlerWorkflow.options.auditor) {
+                showAuditResults(currentSub);
+            } else if (crawlerWorkflow.options.ai_clean) {
+                showAIResults(currentSub);
+            } else {
+                // Move to next subject if no review tools selected
+                crawlerWorkflow.subjects.shift();
+                handleCrawlCompletion();
+            }
+        }
+
+        function renderAuditList(subject, results) {
+            const container = document.getElementById('audit-results-container');
+            const status = document.getElementById('audit-review-status');
+            
+            if (results.length === 0) {
+                container.innerHTML = '<div style="text-align:center; padding:50px; color:var(--success);">✨ Không tìm thấy xung đột đáp án nào!</div>';
+                status.innerText = "Hoàn tất: 0 conflict.";
+                return;
+            }
+
+            status.innerText = `Tìm thấy ${results.length} câu có thể cần đổi đáp án.`;
+            container.innerHTML = results.map(r => `
+                <div class="card" style="margin-bottom:15px; border-left: 4px solid var(--warning);">
+                    <div style="display:flex; gap:20px;">
+                        <div style="width:200px;">
+                            <img src="/static/${r.img}" style="width:100%; border-radius:8px;">
+                        </div>
+                        <div style="flex:1;">
+                            <div style="font-weight:700; margin-bottom:10px;">Conflict tại ID #${r.id}</div>
+                            <div style="display:flex; gap:20px; margin-bottom:15px;">
+                                <div style="background:rgba(255,255,255,0.05); padding:10px; border-radius:8px; flex:1;">
+                                    <div style="font-size:11px; color:var(--text-muted);">HIỆN TẠI</div>
+                                    <div style="font-size:24px; font-weight:800; color:var(--danger);">${r.old_ans}</div>
+                                </div>
+                                <div style="background:rgba(0,229,255,0.1); padding:10px; border-radius:8px; flex:1;">
+                                    <div style="font-size:11px; color:var(--text-muted);">ĐỀ XUẤT (Comment)</div>
+                                    <div style="font-size:24px; font-weight:800; color:var(--success);">${r.suggested}</div>
+                                </div>
+                            </div>
+                            <div style="font-size:12px; color:var(--text-muted);">
+                                Chi tiết: ${JSON.stringify(r.stats)}
+                                ${r.has_conflict ? '<br><span style="color:var(--danger);">⚠️ Có sự tranh cãi giữa các comment!</span>' : ''}
+                            </div>
+                            <div style="margin-top:10px;">
+                                <select class="form-control audit-final-ans" data-id="${r.id}" style="max-width:150px;">
+                                    <option value="${r.old_ans}" ${r.old_ans === r.suggested ? 'selected' : ''}>Giữ ${r.old_ans}</option>
+                                    <option value="A" ${r.suggested === 'A' ? 'selected' : ''}>Chọn A</option>
+                                    <option value="B" ${r.suggested === 'B' ? 'selected' : ''}>Chọn B</option>
+                                    <option value="C" ${r.suggested === 'C' ? 'selected' : ''}>Chọn C</option>
+                                    <option value="D" ${r.suggested === 'D' ? 'selected' : ''}>Chọn D</option>
+                                    <option value="TF" ${r.suggested === 'TF' ? 'selected' : ''}>Chọn TF</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function pollAuditStatus(subject) {
+            const res = await fetch(`/api/audit/subjects/${subject}/results`);
+            const results = await res.json();
+            if (results && results.length > 0) {
+                renderAuditList(subject, results);
+            } else {
+                setTimeout(() => pollAuditStatus(subject), 2000);
+            }
+        }
+
+        async function applyAuditChanges() {
+            const subject = crawlerWorkflow.currentReviewSubject;
+            const changes = {};
+            document.querySelectorAll('.audit-final-ans').forEach(select => {
+                changes[select.dataset.id] = select.value;
+            });
+
+            await fetch(`/api/audit/subjects/${subject}/apply`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(changes)
+            });
+
+            document.getElementById('audit-review-modal').classList.remove('active');
+            
+            // Next step: AI Clean for the SAME subject
+            if (crawlerWorkflow.options.ai_clean) {
+                showAIResults(subject);
+            } else {
+                // Next subject
+                crawlerWorkflow.subjects.shift();
+                handleCrawlCompletion();
+            }
+        }
+
+        function skipAuditor() {
+            const subject = crawlerWorkflow.currentReviewSubject;
+            document.getElementById('audit-review-modal').classList.remove('active');
+            if (crawlerWorkflow.options.ai_clean) {
+                showAIResults(subject);
+            } else {
+                crawlerWorkflow.subjects.shift();
+                handleCrawlCompletion();
+            }
+        }
+
+        function closeAIReview() {
+            document.getElementById('ai-review-modal').classList.remove('active');
+            crawlerWorkflow.subjects.shift();
+            handleCrawlCompletion();
+        }
+
         // --- INIT ---
         async function refreshAll() {
             updateStats();
             loadSubjects();
-            testGroq();
+            checkPendingTasks();
+        }
+
+        async function checkPendingTasks() {
+            try {
+                const res = await fetch('/api/drafts');
+                const data = await res.json();
+                const container = document.getElementById('pending-tasks-container');
+                const list = document.getElementById('pending-tasks-list');
+                
+                if (data.drafts && data.drafts.length > 0) {
+                    container.style.display = 'block';
+                    list.innerHTML = data.drafts.map(d => `
+                        <div class="card" style="padding: 15px; display: flex; justify-content: space-between; align-items: center; border-left: 4px solid var(--accent);">
+                            <div>
+                                <div style="font-weight: 700; font-size: 14px;">${d.subject.toUpperCase()}</div>
+                                <div style="font-size: 11px; color: var(--text-muted);">${d.type === 'audit' ? '🛡️ Chờ đối soát đáp án' : '🪄 Chờ lọc trùng lặp'}</div>
+                            </div>
+                            <button class="btn btn-primary btn-sm" onclick="resumeTask('${d.subject}', '${d.type}')">🚀 Tiếp tục</button>
+                        </div>
+                    `).join('');
+                } else {
+                    container.style.display = 'none';
+                }
+            } catch (err) { console.error(err); }
+        }
+
+        async function resumeTask(subject, type) {
+            if (type === 'audit') {
+                showScreen('auditor');
+                showAuditResults(subject);
+            } else {
+                showScreen('lab');
+                showAIResults(subject);
+            }
+        }
+
+        async function loadBackups() {
+            try {
+                const res = await fetch('/api/backups');
+                const data = await res.json();
+                const list = document.getElementById('backup-list');
+                if (!list) return;
+                
+                if (data.backups && data.backups.length > 0) {
+                    list.innerHTML = data.backups.map(f => `
+                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 10px; background: rgba(255,255,255,0.05); border-radius: 8px; margin-bottom:8px;">
+                            <span style="font-family: monospace; font-size: 13px;">${f}</span>
+                            <button class="btn btn-secondary btn-sm" onclick="restoreBackup('${f}')">⏪ Restore</button>
+                        </div>
+                    `).join('');
+                } else {
+                    list.innerHTML = '<div style="text-align: center; color: var(--text-muted);">No backups found.</div>';
+                }
+            } catch (err) { console.error(err); }
+        }
+
+        async function restoreBackup(filename) {
+            if(!confirm(`Restore backup ${filename}? This will overwrite current data!`)) return;
+            try {
+                const res = await fetch(`/api/backups/${filename}/restore`, { method: 'POST' });
+                if (res.ok) {
+                    alert("✅ Restored! Reloading...");
+                    window.location.reload();
+                }
+            } catch (err) { alert(err); }
         }
 
         async function init() {
@@ -1122,6 +1439,7 @@
             pollStatus();
             refreshAll();
             loadConfig();
+            loadBackups();
 
             // Kiểm tra kết quả AI cũ - Thử lại nhiều lần nếu cần
             const checkAI = async () => {
