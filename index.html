@@ -1985,23 +1985,33 @@
             localStorage.setItem(currentSubjectKey, JSON.stringify(studyState));
         }
 
-        function bootStudyHub() {
+        let globalSourceMapping = {};
+
+        async function bootStudyHub() {
+            // Fetch mapping once if empty
+            if (Object.keys(globalSourceMapping).length === 0) {
+                try {
+                    const res = await fetch('/api/source_mapping');
+                    globalSourceMapping = await res.json();
+                } catch(e) {}
+            }
+
             let rd = loadRawData().filter(q => q.ans && q.ans !== "?");
             if (rd.length === 0) { alert("Thiếu dữ liệu cào!"); return; }
             
-            // Xây dựng kho tri thức cho Học Tập: Tách Bộ Đề từ Tên File
-            // VD: img = "images/NEW_TEST_sdn302_su25_re_q001.webp" -> setName = "sdn302_su25_re"
             let sets = new Set();
             globalStudyQuestions = rd.map((q, idx) => {
                 let p = Object.assign({}, q);
-                p.gIndex = idx; // Số ID Cố định Mãi Mãi của Câu
+                p.gIndex = idx;
                 
-                // Mổ xẻ chuỗi để tìm tên bộ đề
                 if (p.type === "text") {
                     p.setName = "Quizlet_Set";
                 } else {
                     let filename = p.img.substring(p.img.lastIndexOf('/') + 1);
-                    let setName = filename.split('_q')[0];
+                    // Ưu tiên lấy tên đẹp từ mapping cho source_id
+                    let sid = p.source_id || filename.split('_q')[0];
+                    let setName = globalSourceMapping[sid] || sid;
+                    
                     if (setName.startsWith("NEW_TEST_")) setName = setName.substring(9);
                     p.setName = setName;
                 }
@@ -2010,26 +2020,65 @@
                 return p;
             });
             
+            function getSourceScore(s) {
+                if (!s) return 0;
+                s = s.toLowerCase();
+                
+                let year = 0;
+                let semMatch = s.match(/(sp|fa|su)\s*(\d{2,4})/);
+                if (semMatch) {
+                    year = parseInt(semMatch[2]);
+                } else {
+                    let year4d = s.match(/(20\d{2})/);
+                    if (year4d) year = parseInt(year4d[1]);
+                }
+                if (year > 2000) year -= 2000;
+                
+                let semPriority = 0;
+                if (s.includes('fa')) semPriority = 3;
+                else if (s.includes('su')) semPriority = 2;
+                else if (s.includes('sp')) semPriority = 1;
+                
+                let typeBonus = (s.includes('fe') || s.includes('final')) ? 5 : 0;
+                let isRe = s.includes('re') ? -1 : 0;
+
+                return year * 1000 + semPriority * 100 + typeBonus + isRe;
+            }
+
+            // SẮP XẾP TOÀN BỘ CÂU HỎI THEO THỜI GIAN CỦA SET
+            globalStudyQuestions.sort((a, b) => {
+                let scoreA = getSourceScore(a.setName);
+                let scoreB = getSourceScore(b.setName);
+                if (scoreB !== scoreA) return scoreB - scoreA;
+                return a.img.localeCompare(b.img); 
+            });
+
+            // QUAN TRỌNG: ĐÁNH SỐ THỨ TỰ MỚI (DISPLAY INDEX) TỪ 1 ĐẾN N SAU KHI SẮP XẾP
+            globalStudyQuestions.forEach((q, i) => {
+                q.displayIndex = i + 1;
+            });
+
             // Nạp State Trí Nhớ từ LocalStorage
             loadStudyState();
             
             // Fix Option Của Danh Sản Các "Sets" (Từng Bộ Đề)
             let valDropdown = document.getElementById("filter-value");
             valDropdown.innerHTML = "";
-            let sortedSets = Array.from(sets).sort();
-            sortedSets.forEach(s => { valDropdown.innerHTML += `<option value="set_${s}">[ĐỀ GỐC]: ${s}</option>`; });
-            // Add Option Danh cho Lọc Đáp Án
+            let sortedSets = Array.from(sets).sort((a, b) => getSourceScore(b) - getSourceScore(a));
+            sortedSets.forEach(s => { 
+                let displayName = globalSourceMapping[s] || s;
+                valDropdown.innerHTML += `<option value="set_${s}">[ĐỀ GỐC]: ${displayName}</option>`; 
+            });
+            
             [1, 2, 3, 4].forEach(n => { valDropdown.innerHTML += `<option value="ans_${n}">[LOẠI FORMAT]: Có ${n} Lựa Chọn Đúng</option>`; });
             
             document.getElementById("filter-type").value = "all";
-            
-            // Hiển thị UI
             document.querySelectorAll('.screen').forEach(s => s.style.display = 'none');
             document.getElementById("hub-title").innerText = document.getElementById("subject-select").value;
             document.getElementById("study-hub-screen").style.display = "block";
             document.getElementById("btn-fs-toggle").style.display = "none";
             
-            applyStudyFilter(); // Lọc và vẽ Map các ô vuông ra
+            applyStudyFilter();
         }
 
         function applyStudyFilter() {
@@ -2037,7 +2086,6 @@
             let fValStr = document.getElementById("filter-value").value;
             let valDropdown = document.getElementById("filter-value");
             
-            // Phân nhánh logic lọc
             if (fType === "all") {
                 valDropdown.style.display = "none";
                 filteredStudyQuestions = [...globalStudyQuestions];
@@ -2046,17 +2094,15 @@
                 filteredStudyQuestions = globalStudyQuestions.filter(q => studyState.bookmarked.includes(q.img));
             } else if (fType === "set") {
                 let pureSet = fValStr.replace("set_", "");
-                // Hiển thị dropdown
                 valDropdown.style.display = "inline-block";
-                
-                // Cưỡng ép select những options Của SET, ẩn những option Của ANS
                 Array.from(valDropdown.options).forEach(opt => { opt.style.display = opt.value.startsWith("set_") ? "block" : "none"; });
-                if (!fValStr.startsWith("set_")) { valDropdown.value = Array.from(valDropdown.options).find(o => o.value.startsWith("set_")).value; pureSet = valDropdown.value.replace("set_", ""); }
-
+                if (!fValStr.startsWith("set_")) { 
+                    valDropdown.value = Array.from(valDropdown.options).find(o => o.value.startsWith("set_")).value; 
+                    pureSet = valDropdown.value.replace("set_", ""); 
+                }
                 filteredStudyQuestions = globalStudyQuestions.filter(q => q.setName === pureSet);
             }
             
-            // Lọc theo định dạng câu (Checkboxes)
             let allowedStudyTypes = Array.from(document.querySelectorAll(".study-type-cb:checked")).map(cb => cb.value);
             filteredStudyQuestions = filteredStudyQuestions.filter(q => {
                 let isTF = (q.type === 'TF');
@@ -2074,7 +2120,7 @@
             gridEl.innerHTML = "";
             
             if (filteredStudyQuestions.length === 0) {
-                gridEl.innerHTML = `<h3 style="grid-column: 1/-1; text-align: center; color:#e74c3c;">Vùng này chưa có con quái (câu hỏi) nào cả!</h3>`;
+                gridEl.innerHTML = `<h3 style="grid-column: 1/-1; text-align: center; color:#e74c3c;">Vùng này chưa có câu hỏi nào!</h3>`;
                 return;
             }
             
@@ -2085,18 +2131,16 @@
                 else if (studyState.viewed.includes(q.img)) cStr += " viewed";
                 if (studyState.bookmarked.includes(q.img)) cStr += " bookmarked";
                 
-                // Render thẻ Ô Vuông (Hiển thị Global ID cố định để dễ quản lý trí nhớ - gIndex+1)
-                htmlStr += `<div class="${cStr}" title="Thuộc Đề: ${q.setName}&#10;Loại: ${q.ansLen} đáp án đúng" onclick="openStudyViewer(${iterIndex})">${q.gIndex + 1}</div>`;
+                // HIỂN THỊ SỐ THỨ TỰ MỚI (ĐÃ ĐƯỢC RE-INDEX THEO THỜI GIAN)
+                htmlStr += `<div class="${cStr}" title="Bộ đề: ${q.setName}" onclick="openStudyViewer(${iterIndex})">${q.displayIndex}</div>`;
             });
             
             gridEl.innerHTML = htmlStr;
-            
-            // Xử lý thống kê (cập nhật số lượng theo toàn thư)
             let tv = studyState.viewed.length;
             let tb = studyState.bookmarked.length;
             let tt = globalStudyQuestions.length;
             let percentDone = Math.round((tv/tt)*100) || 0;
-            document.getElementById("study-stats").innerText = `Tiến độ: Hoàn tất ${percentDone}% Toàn Thư (${tv}/${tt}) | Star: ${tb} ⭐`;
+            document.getElementById("study-stats").innerText = `Tiến độ: Hoàn tất ${percentDone}% (${tv}/${tt}) | Star: ${tb} ⭐`;
         }
         
         // Mở ra không gian chiêm nghiệm (View) cho 1 câu
@@ -2131,9 +2175,9 @@
                 imgEl.src = q.img;
             }
 
-            document.getElementById("s-current-q").innerText = currentStudyIndex + 1;
+            document.getElementById("s-current-q").innerText = q.displayIndex;
             let totalLbl = document.getElementById("s-total-q");
-            if(totalLbl) totalLbl.innerText = filteredStudyQuestions.length;
+            if(totalLbl) totalLbl.innerText = globalStudyQuestions.length;
             
             let ansLabel = document.getElementById("s-ans-label");
             if(ansLabel) ansLabel.innerText = q.ans.split('').sort().join('');

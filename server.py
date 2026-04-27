@@ -21,6 +21,31 @@ import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE" # Tránh lỗi conflict thư viện trên Windows
 
+# Models 
+class AuditRequest(BaseModel):
+    urls: List[str]
+
+class SourceModel(BaseModel):
+    id: str
+    name: str
+    url: str
+    subject: str
+    enabled: bool = True
+
+class Config(BaseModel):
+    USERNAME: str
+    PASSWORD: str
+    AI_PROVIDER: str = "gemini"
+    GEMINI_API_KEY: str = ""
+    GROQ_API_KEY: str = ""
+    SOURCES: List[dict] = []
+    IMAGES_DIR: str = "images"
+    IMAGES_WORD_DIR: str = "images_word"
+    ENABLE_WORD_EXPORT: bool = False
+    ENABLE_OCR_CLASSIFY: bool = False
+    PAGE_TIMEOUT: int = 60
+    REQUEST_DELAY: int = 2
+
 # Khởi tạo Local OCR (Chỉ tải model khi dùng lần đầu)
 reader = None
 
@@ -61,14 +86,25 @@ start_lock = asyncio.Lock()
 workflow_lock = asyncio.Lock()
 
 # Các route phục vụ file HTML trực tiếp
+from fastapi.responses import HTMLResponse
+import json
+
 @app.get("/")
 @app.get("/admin.html")
 async def read_admin():
-    return FileResponse("admin.html")
+    with open("admin.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    mapping = get_source_mapping()
+    inject = f"<script>window.globalSourceMapping = {json.dumps(mapping, ensure_ascii=False)};</script>"
+    return HTMLResponse(content=html.replace("</head>", f"{inject}</head>"))
 
 @app.get("/index.html")
 async def read_index():
-    return FileResponse("index.html")
+    with open("index.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    mapping = get_source_mapping()
+    inject = f"<script>window.globalSourceMapping = {json.dumps(mapping, ensure_ascii=False)};</script>"
+    return HTMLResponse(content=html.replace("</head>", f"{inject}</head>"))
 
 # --- Static Routing for Website compatibility ---
 @app.get("/data.js")
@@ -110,6 +146,51 @@ app.add_middleware(
 )
 
 # --- Data Manager Endpoints ---
+def get_source_mapping():
+    """Tạo mapping từ ID rác sang Tên đẹp trong config.json"""
+    try:
+        from config import load_config
+        cfg = load_config()
+        sources = cfg.get("SOURCES", [])
+        return {s.get("id"): s.get("name") for s in sources if s.get("id") and s.get("name")}
+    except:
+        return {}
+
+def get_source_score(source_id: str) -> int:
+    """Quy đổi mã đề thành điểm số để sắp xếp (ví dụ: sp26 -> 261, fa25 -> 253)"""
+    if not source_id: return 0
+    
+    mapping = get_source_mapping()
+    display_name = mapping.get(source_id, source_id).lower()
+    s = display_name
+    
+    # regex thông minh hơn: tìm năm đứng sau kỳ học hoặc năm 4 chữ số
+    # Ưu tiên các cụm như sp26, fa25, su24 hoặc 2024, 2025
+    year = 0
+    sem_match = re.search(r'(sp|fa|su)\s*(\d{2,4})', s)
+    if sem_match:
+        year = int(sem_match.group(2))
+    else:
+        # Nếu không thấy sp/fa/su đi kèm số, tìm số 4 chữ số (ví dụ 2024)
+        year_4d = re.search(r'(20\d{2})', s)
+        if year_4d:
+            year = int(year_4d.group(1))
+            
+    if year > 2000: year -= 2000 
+    
+    # Tìm học kỳ
+    sem_priority = 0
+    if 'fa' in s: sem_priority = 3
+    elif 'su' in s: sem_priority = 2
+    elif 'sp' in s: sem_priority = 1
+    
+    # Điểm cộng cho đề chính thức (fe/final)
+    type_bonus = 5 if ('fe' in s or 'final' in s) else 0
+    is_re = -1 if 're' in s else 0
+
+    # Công thức: Năm * 1000 + Kỳ * 100 + Loại + Bonus
+    return year * 1000 + sem_priority * 100 + type_bonus + is_re
+
 def get_quiz_data():
     DATA_FILE = "data.js"
     if not os.path.exists(DATA_FILE):
@@ -150,19 +231,29 @@ def save_quiz_data(data):
         if os.path.exists(tmp_file):
             os.remove(tmp_file)
 
+@app.get("/api/source_mapping")
+async def api_source_mapping():
+    return get_source_mapping()
+
 @app.get("/api/data/subjects")
 async def list_subjects():
     data = get_quiz_data()
     subjects = []
     metadata = data.get("_metadata", {})
+    mapping = get_source_mapping()
     
     for name, questions in data.items():
         if name == "_metadata": continue
         if not isinstance(questions, list): continue
         
+        # Thống kê sơ bộ các mã đề trong môn này
+        sources_in_subject = list(set(q.get("source_id") for q in questions if q.get("source_id")))
+        display_sources = sorted([mapping.get(s, s) for s in sources_in_subject], key=get_source_score, reverse=True)
+
         subjects.append({
             "name": name,
             "count": len(questions),
+            "sources": display_sources,
             "last_updated": datetime.now().isoformat() 
         })
     return {"subjects": subjects, "metadata": metadata}
@@ -170,19 +261,56 @@ async def list_subjects():
 @app.delete("/api/data/subjects/{name}")
 async def delete_subject(name: str):
     data = get_quiz_data()
-    if name in data:
-        # Xóa khỏi JSON
-        del data[name]
-        save_quiz_data(data)
-        
-        # Xóa folder ảnh tương ứng (nếu có)
-        import shutil
-        subject_dir = os.path.join("images", name.lower())
-        if os.path.exists(subject_dir):
-            shutil.rmtree(subject_dir)
-            
-        return {"message": f"Deleted subject {name}"}
-    raise HTTPException(status_code=404, detail="Subject not found")
+    if name not in data:
+        raise HTTPException(status_code=404, detail="Subject not found")
+
+    # 1. Thu thập ảnh của môn hiện tại
+    subject_items = data.get(name, [])
+    target_imgs = set()
+    for item in subject_items:
+        if isinstance(item, dict) and item.get("img"):
+            target_imgs.add(item["img"])
+
+    # 2. Thu thập ảnh của TẤT CẢ các môn khác
+    used_by_others = set()
+    for s_name, items in data.items():
+        if s_name != name and s_name != "_metadata":
+            for item in items:
+                if isinstance(item, dict) and item.get("img"):
+                    used_by_others.add(item["img"])
+
+    # 3. Xác định ảnh mồ côi (chỉ thuộc môn này, không môn nào khác dùng)
+    orphaned_imgs = target_imgs - used_by_others
+
+    # 4. Xóa vật lý các ảnh mồ côi
+    deleted_count = 0
+    for img_path in orphaned_imgs:
+        try:
+            # Đường dẫn vật lý thường là img_path (ví dụ: 'images/abc.webp')
+            if os.path.exists(img_path):
+                os.remove(img_path)
+                deleted_count += 1
+        except Exception as e:
+            print(f"Error deleting {img_path}: {e}")
+
+    # 5. Xóa khỏi JSON
+    del data[name]
+    save_quiz_data(data)
+    
+    # 6. Dọn dẹp folder (nếu trống)
+    subject_dir = os.path.join("images", name.lower())
+    if os.path.exists(subject_dir):
+        try:
+            if not os.listdir(subject_dir):
+                os.rmdir(subject_dir)
+        except:
+            pass
+
+    return {
+        "message": f"Deleted subject {name}",
+        "images_cleaned": deleted_count,
+        "shared_images_kept": len(target_imgs & used_by_others)
+    }
 
 @app.get("/api/data/subjects/{name}")
 async def get_subject_data(name: str, page: int = 1, limit: int = 12, filter_type: str = "all", source_id: str = ""):
@@ -202,10 +330,14 @@ async def get_subject_data(name: str, page: int = 1, limit: int = 12, filter_typ
     if id_changed:
         save_quiz_data(data)
     
+    mapping = get_source_mapping()
     processed = []
     for idx, q in enumerate(questions):
         # Filter by source_id if provided
-        if source_id and q.get("source_id") != source_id:
+        raw_sid = q.get("source_id", "")
+        display_sid = mapping.get(raw_sid, raw_sid)
+        
+        if source_id and display_sid != source_id:
             continue
             
         img_path = q.get("img", "")
@@ -216,24 +348,40 @@ async def get_subject_data(name: str, page: int = 1, limit: int = 12, filter_typ
         elif not img_exists: error = "image_not_found"
         elif not q.get("ans"): error = "missing_answer"
         
-        q_item = {**q, "original_index": idx, "error": error}
+        q_item = {**q, "original_index": idx, "error": error, "source_id": display_sid}
         
         if filter_type == "error" and not error: continue
         if filter_type == "valid" and error: continue
         
         processed.append(q_item)
     
+    # Sắp xếp các câu hỏi: Theo điểm source_id giảm dần, sau đó theo ID ảnh
+    processed.sort(key=lambda x: (get_source_score(x.get("source_id", "")), x.get("img", "")), reverse=True)
+    
     # Phân trang
     total = len(processed)
     start = (page - 1) * limit
     end = start + limit
+    
+    # Lấy danh sách unique source_id, map sang tên đẹp và sắp xếp
+    mapping = get_source_mapping()
+    raw_sources = list(set(q.get("source_id") for q in questions if q.get("source_id")))
+    
+    # Map sang tên đẹp để hiển thị
+    sources = []
+    for rs in raw_sources:
+        display_name = mapping.get(rs, rs)
+        if display_name not in sources:
+            sources.append(display_name)
+            
+    sources.sort(key=get_source_score, reverse=True)
     
     return {
         "items": processed[start:end],
         "total": total,
         "page": page,
         "limit": limit,
-        "sources": list(set(q.get("source_id") for q in questions if q.get("source_id")))
+        "sources": sources
     }
 
 @app.delete("/api/data/subjects/{name}/items/{item_id}")
@@ -377,14 +525,20 @@ def get_thread_from_img(img_path, config_urls):
 @app.get("/api/audit/subjects/{name}/threads")
 async def get_subject_threads(name: str):
     data = get_quiz_data()
-    if name not in data:
-        raise HTTPException(status_code=404, detail="Subject not found")
+    # Tìm key khớp nhất (ví dụ MLN122_v3 khớp với MLN122 trong data)
+    base_name = name.split('_')[0].upper()
+    actual_key = next((k for k in data.keys() if k.upper().startswith(base_name)), name)
+    
+    if actual_key not in data:
+        return []
     
     config_data = load_config_data()
-    config_urls = config_data.get("POST_URLS", [])
+    sources = config_data.get("SOURCES", [])
+    # Lấy toàn bộ URL có liên quan đến môn này (không phân biệt _v3)
+    config_urls = [s["url"] for s in sources if base_name in s.get("subject", "").upper() and s.get("enabled")]
     
     threads = {}
-    for q in data[name]:
+    for q in data[actual_key]:
         url, slug = get_thread_from_img(q["img"], config_urls)
         if url:
             if url not in threads:
@@ -393,66 +547,76 @@ async def get_subject_threads(name: str):
             
     return list(threads.values())
 
-async def audit_thread_worker(subject_name, urls):
-    """Worker chạy ngầm để quét đáp án từ comment"""
+async def get_comment_audit_data(subject_name, urls):
+    """Hàm lõi để quét đáp án từ comment trên FuOverflow"""
     try:
         from fuoverflow_scraper_v6 import create_driver, login, BASE_URL
         from bs4 import BeautifulSoup
         import re
         from collections import Counter
         
-        print(f"\n[AUDIT] 🚀 Bắt đầu đối soát môn: {subject_name}")
+        await broadcast_log(f"🚀 Bắt đầu quét Comment cho {subject_name} ({len(urls)} threads)")
         driver = create_driver()
         login(driver)
         
         data = get_quiz_data()
-        questions = data.get(subject_name, [])
-        total_questions = len(questions)
+        # Ưu tiên khớp chính xác, nếu không mới tìm theo tiền tố (MLN122 vs MLN122_v3)
+        actual_key = subject_name if subject_name in data else next((k for k in data.keys() if k.upper().startswith(subject_name.split('_')[0].upper())), subject_name)
+        questions = data.get(actual_key, [])
         
-        diff_results = []
+        await broadcast_log(f"🚀 Bắt đầu quét Comment cho {actual_key} ({len(urls)} threads, {len(questions)} câu trong kho)")
+        driver = create_driver()
+        login(driver)
+        
+        all_votes = {} # { q_id: {suggested, votes, conflict, url} }
         processed_count = 0
         
         for url in urls:
-            msg = f"🔍 Đang đối soát Thread: {url}"
-            print(f"\n[AUDIT] {msg}")
-            await broadcast_log(msg)
-            
+            slug = url.rstrip("/").split("/")[-1]
+            await broadcast_log(f"🔍 Đang cào Thread: {slug}")
             driver.get(url)
             time.sleep(3)
             soup = BeautifulSoup(driver.page_source, "lxml")
             
-            # Tìm tất cả link ảnh trong thread này
             links = soup.find_all("a", href=lambda h: h and "/attachments/" in h)
-            thread_total = len(links)
-            
             for i, a in enumerate(links, 1):
                 att_h = a.get("href")
                 side_href = a.get("data-lb-sidebar-href", att_h)
+                if not side_href: side_href = att_h
                 if not side_href.startswith("http"): side_href = BASE_URL + side_href
                 
-                # Tìm câu hỏi tương ứng trong data.js dựa trên tên file logic
-                slug = url.rstrip("/").split("/")[-1]
-                safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', slug)
-                img_name_part = f"{safe_slug}_q{str(i).zfill(3)}"
+                # Logic khớp "thần thánh" từ Scraper gốc:
+                # 1. Trích xuất ID từ link (ví dụ: /attachments/abc.12345/ -> 12345)
+                # Thử nhiều kiểu format link khác nhau trên XenForo
+                aid_match = re.search(r"\.(\d+)/?$", att_h) or \
+                            re.search(r"/(\d+)/?$", att_h) or \
+                            re.search(r"(?:attachmentid=|attachment\.)(\d+)", side_href)
                 
-                # Tìm q_idx trong data
-                q_idx = -1
-                for idx, q in enumerate(questions):
-                    if img_name_part in q["img"]:
-                        q_idx = idx
-                        break
+                target_q = None
+                if aid_match:
+                    aid = aid_match.group(1)
+                    target_q = next((q for q in questions if str(q.get("att_id")) == aid), None)
                 
-                if q_idx == -1: 
+                # 2. Fallback: Nếu không có att_id, thử khớp theo tên file ảnh (Slug + Index)
+                if not target_q:
+                    safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', slug)
+                    img_name_part = f"{safe_slug}_q{str(i).zfill(3)}"
+                    target_q = next((q for q in questions if img_name_part in q.get("img", "")), None)
+
+                if not target_q:
+                    # Nếu vẫn không thấy, bỏ qua để tránh rác
                     continue
                 
+                q_id = str(target_q.get("id"))
                 processed_count += 1
-                progress_msg = f"[AUDIT] Progress: {processed_count}/{total_questions} questions (Thread: {i}/{thread_total})"
-                print(progress_msg) # Xuất log có xuống dòng để terminal ko bị "đứng"
-                await broadcast_log(progress_msg)
                 
-                # Quét comment của ảnh này
+                # Log mỗi 5 câu để tránh spam nhưng vẫn đủ theo dõi
+                if processed_count % 5 == 0:
+                    img_display = target_q.get("img", "Unknown")
+                    await broadcast_log(f"  📸 Đang xem xét câu {processed_count}: {img_display}")
+
                 driver.get(side_href)
-                time.sleep(2)
+                time.sleep(1.5) # Đợi sidebar load (Tăng nhẹ theo scraper gốc)
                 s_soup = BeautifulSoup(driver.page_source, "lxml")
                 txts = [el.get_text(strip=True).upper() for el in s_soup.select(".message-body .bbWrapper, .comment-body .bbWrapper, .comment-content .bbWrapper")]
                 
@@ -468,44 +632,49 @@ async def audit_thread_worker(subject_name, urls):
                         f = "".join(sorted(set(letters)))
                         if f: votes.append(f)
                 
-                counts = Counter(votes)
-                suggested = "?"
-                has_conflict = False
                 if votes:
+                    counts = Counter(votes)
                     common = counts.most_common(2)
                     suggested = common[0][0]
-                    if len(common) > 1 and common[0][1] == common[1][1]:
-                        has_conflict = True
-                
-                old_ans = questions[q_idx]["ans"]
-                q_id = questions[q_idx].get("id")
-                
-                if old_ans != suggested or has_conflict:
-                    diff_results.append({
-                        "id": q_id,
-                        "img": questions[q_idx]["img"],
-                        "old_ans": old_ans,
+                    has_conflict = len(common) > 1 and common[0][1] == common[1][1]
+                    
+                    all_votes[q_id] = {
                         "suggested": suggested,
-                        "stats": dict(counts),
+                        "votes": dict(counts),
                         "has_conflict": has_conflict,
-                        "url": side_href
-                    })
+                        "url": side_href,
+                        "old_ans": target_q.get("ans", "?"),
+                        "img": target_q.get("img", "")
+                    }
             
         driver.quit()
-        state.audit_results = diff_results
-        final_msg = f"✅ Đối soát xong! Tìm thấy {len(diff_results)} câu cần xem xét."
-        print(f"\n[AUDIT] {final_msg}")
-        await broadcast_log(final_msg)
-        save_draft(subject_name, "audit", diff_results)
-        
+        return all_votes
     except Exception as e:
-        err_msg = f"❌ Lỗi đối soát: {str(e)}"
-        print(f"\n[AUDIT] {err_msg}")
-        await broadcast_log(err_msg)
+        await broadcast_log(f"❌ Lỗi quét comment: {str(e)}")
         if 'driver' in locals(): driver.quit()
+        return {}
 
-class AuditRequest(BaseModel):
-    urls: List[str]
+async def audit_thread_worker(subject_name, urls):
+    """Worker cũ cho Answer Auditor - Tận dụng hàm lõi mới"""
+    all_votes = await get_comment_audit_data(subject_name, urls)
+    
+    # Lọc ra các câu có sự khác biệt để hiển thị ở bản cũ
+    diff_results = []
+    for q_id, v in all_votes.items():
+        if v["old_ans"] != v["suggested"] or v["has_conflict"]:
+            diff_results.append({
+                "id": q_id,
+                "img": v["img"],
+                "old_ans": v["old_ans"],
+                "suggested": v["suggested"],
+                "stats": v["votes"],
+                "has_conflict": v["has_conflict"],
+                "url": v["url"]
+            })
+            
+    state.audit_results = diff_results
+    await broadcast_log(f"✅ Đối soát xong! Tìm thấy {len(diff_results)} câu cần xem xét.")
+    save_draft(subject_name, "audit", diff_results)
 
 @app.post("/api/audit/subjects/{name}/scan")
 async def start_audit_scan(name: str, req: AuditRequest):
@@ -519,6 +688,184 @@ async def start_audit_scan(name: str, req: AuditRequest):
 @app.get("/api/audit/subjects/{name}/results")
 async def get_audit_results(name: str):
     return load_draft(name, "audit") or state.audit_results
+
+# --- SMART REFINE ENDPOINTS ---
+@app.post("/api/audit/subjects/{name}/smart/start")
+async def start_smart_refine(name: str, req: AuditRequest):
+    if state.process is not None and state.process.poll() is None:
+        raise HTTPException(status_code=400, detail="Crawler is running")
+    
+    asyncio.create_task(smart_refine_worker(name, req.urls))
+    return {"message": "Smart Refine sequence started"}
+
+@app.get("/api/audit/subjects/{name}/smart/results")
+async def get_smart_results(name: str):
+    return load_draft(name, "smart_audit")
+
+@app.post("/api/audit/subjects/{name}/smart/apply")
+async def apply_smart_changes(name: str, changes: dict):
+    # changes: { q_id: final_ans }
+    create_backup(f"{name}_pre_smart_apply")
+    data = get_quiz_data()
+    if name not in data: raise HTTPException(status_code=404)
+    
+    updated = 0
+    id_map = {str(q.get("id")): q for q in data[name] if isinstance(q, dict)}
+    for q_id, ans in changes.items():
+        if q_id in id_map:
+            id_map[q_id]["ans"] = ans
+            id_map[q_id]["is_smart_audited"] = True
+            updated += 1
+            
+    save_quiz_data(data)
+    delete_draft(name, "smart_audit")
+    return {"message": f"Applied {updated} changes"}
+
+async def smart_refine_worker(subject_name, urls):
+    try:
+        await broadcast_log(f"🪄 Bắt đầu Smart Refine cho môn {subject_name}...")
+        
+        # Nếu urls rỗng, tự động lấy từ config
+        if not urls:
+            config_data = load_config_data()
+            sources = config_data.get("SOURCES", [])
+            
+            # Ưu tiên lấy các nguồn khớp chính xác subject_name (ví dụ: MLN122_v3)
+            exact_matches = [s["url"] for s in sources if s.get("subject") == subject_name and s.get("enabled")]
+            
+            if exact_matches:
+                urls = exact_matches
+                await broadcast_log(f"💡 Tìm thấy {len(urls)} threads khớp chính xác với {subject_name}.")
+            else:
+                # Nếu không có khớp chính xác, tìm theo tiền tố (MLN122)
+                base_name = subject_name.split('_')[0].upper()
+                urls = [s["url"] for s in sources if base_name in s.get("subject", "").upper() and s.get("enabled")]
+                await broadcast_log(f"💡 Không có khớp chính xác, tự động lấy {len(urls)} threads theo tiền tố {base_name}.")
+
+        # Phase 1: Comment Mining
+        await broadcast_log(f"🔎 Giai đoạn 1: Đang thu thập comment từ {len(urls)} threads trên FuOverflow...")
+        all_votes = await get_comment_audit_data(subject_name, urls)
+        await broadcast_log(f"✅ Đã quét xong comment cho {len(all_votes)} câu hỏi.")
+        
+        # Phase 2: Filter Suspicious Items
+        await broadcast_log(f"📊 Giai đoạn 2: Đang đối soát và lọc các câu nghi vấn...")
+        data = get_quiz_data()
+        # Ưu tiên khớp chính xác, nếu không mới tìm theo tiền tố
+        actual_key = subject_name if subject_name in data else next((k for k in data.keys() if k.upper().startswith(subject_name.split('_')[0].upper())), subject_name)
+        
+        questions = data.get(actual_key, [])
+        await broadcast_log(f"📋 Tìm thấy {len(questions)} câu hỏi trong kho {actual_key} để đối soát.")
+        suspicious = []
+        
+        for i, q in enumerate(questions):
+            q_id = str(q.get("id"))
+            vote_info = all_votes.get(q_id)
+            
+            is_suspicious = False
+            reason = ""
+            
+            if not vote_info:
+                # Không có comment -> Cần AI thẩm định vì ko có cơ sở cộng đồng
+                is_suspicious = True
+                reason = "Không tìm thấy comment trên FuO"
+            elif q.get("ans") != vote_info["suggested"]:
+                is_suspicious = True
+                reason = f"Xung đột: Máy ({q.get('ans')}) vs CĐ ({vote_info['suggested']})"
+            elif vote_info.get("has_conflict"):
+                is_suspicious = True
+                reason = "Cộng đồng đang tranh cãi (nhiều đáp án khác nhau)"
+            elif q.get("ans") == "?" or not q.get("ans"):
+                is_suspicious = True
+                reason = "Thiếu đáp án hiện tại"
+
+            # Log chi tiết đối soát mỗi 50 câu
+            if i % 50 == 0:
+                status = "⚠️ NGHI VẤN" if is_suspicious else "✅ OK"
+                await broadcast_log(f"  ⚖️ Đối soát câu {i+1}/{len(questions)}: {status} ({reason if is_suspicious else 'Khớp'})")
+
+            if is_suspicious:
+                suspicious.append({
+                    "id": q_id,
+                    "img": q["img"],
+                    "questionText": q.get("questionText", ""),
+                    "current_ans": q.get("ans", ""),
+                    "comment_ans": vote_info["suggested"] if vote_info else "N/A",
+                    "comment_votes": vote_info["votes"] if vote_info else {},
+                    "reason": reason
+                })
+
+        if not suspicious:
+            await broadcast_log(f"✨ Tuyệt vời! Không phát hiện câu nào nghi vấn trong {subject_name}.")
+            save_draft(subject_name, "smart_audit", [])
+            return
+
+        await broadcast_log(f"🧠 Giai đoạn 3: AI bắt đầu thẩm định {len(suspicious)} câu nghi vấn bằng dữ liệu văn bản...")
+        
+        # Phase 3: AI Verification (Text-based Batching)
+        config = load_config_data()
+        gemini_key = config.get("GEMINI_API_KEY")
+        
+        final_results = []
+        batch_size = 30 # Tăng lên 30 vì dùng văn bản cực nhẹ
+        
+        total_batches = -(-len(suspicious)//batch_size)
+        for i in range(0, len(suspicious), batch_size):
+            batch = suspicious[i : i + batch_size]
+            current_batch_num = i//batch_size + 1
+            await broadcast_log(f"🤖 AI đang xử lý nhóm {current_batch_num}/{total_batches} ({len(batch)} câu trắc nghiệm)...")
+            
+            # Xây dựng nội dung văn bản cho batch
+            batch_context = []
+            for b in batch:
+                batch_context.append({
+                    "id": b["id"],
+                    "question": b["questionText"][:500], # Giới hạn độ dài để tránh quá tải token
+                    "current": b["current_ans"],
+                    "community_suggested": b["comment_ans"]
+                })
+
+            prompt = f"""Bạn là một chuyên gia thẩm định đáp án trắc nghiệm. 
+            Dưới đây là danh sách {len(batch)} câu hỏi cùng đáp án hiện tại và ý kiến từ cộng đồng.
+            Nhiệm vụ của bạn:
+            1. Phân tích nội dung câu hỏi và các lựa chọn (nếu có trong text).
+            2. Đối chiếu với đáp án hiện tại và gợi ý từ cộng đồng.
+            3. Chọn ra đáp án ĐÚNG NHẤT (A, B, C, D hoặc True/False).
+            4. Nếu văn bản câu hỏi bị lỗi hoặc không đủ thông tin để chốt, hãy giữ nguyên đáp án hiện tại.
+
+            DANH SÁCH CÂU HỎI:
+            {json.dumps(batch_context, ensure_ascii=False)}
+
+            TRẢ VỀ JSON DUY NHẤT: {{"results": [{{"id": "...", "final_ans": "...", "explanation": "..."}}]}}"""
+            
+            try:
+                # Dùng hàm gửi văn bản (sẽ tạo mới hoặc dùng generateContent trực tiếp)
+                ai_res = await ask_gemini_text_only(prompt, gemini_key)
+                
+                # Map kết quả AI về với batch
+                for item in batch:
+                    res_match = next((r for r in ai_res if str(r.get("id")) == str(item["id"])), None)
+                    if res_match:
+                        item["ai_ans"] = res_match.get("final_ans", "N/A")
+                        item["explanation"] = res_match.get("explanation", "")
+                    else:
+                        item["ai_ans"] = "N/A"
+                        item["explanation"] = "AI skipped or text unclear"
+                    final_results.append(item)
+            except Exception as e:
+                await broadcast_log(f"❌ Lỗi AI tại nhóm {current_batch_num}: {str(e)}")
+                for item in batch:
+                    item["ai_ans"] = "Error"
+                    item["explanation"] = f"Request Failed: {str(e)}"
+                    final_results.append(item)
+            
+            await asyncio.sleep(5) # Tuân thủ RPM = 15/phút (4s/req + 1s an toàn)
+
+        # Phase 4: Save Result
+        save_draft(subject_name, "smart_audit", final_results)
+        await broadcast_log(f"🎉 Đã hoàn thành! {len(final_results)} câu đã được thẩm định. Bạn có thể mở bảng kết quả để xem ảnh và chốt đáp án.")
+
+    except Exception as e:
+        await broadcast_log(f"❌ Smart Refine Error: {str(e)}")
 
 @app.post("/api/audit/subjects/{name}/apply")
 async def apply_audit_changes(name: str, changes: dict):
@@ -542,6 +889,49 @@ async def apply_audit_changes(name: str, changes: dict):
     return {"message": f"Applied {updated_count} changes successfully"}
 
 # --- Gemini AI Support ---
+async def ask_gemini_text_only(prompt: str, api_key: str):
+    """Gửi yêu cầu văn bản thuần túy cho Gemini (Tiết kiệm Token & tránh 503)"""
+    if not api_key: return []
+    
+    model_id = "gemini-1.5-flash" # Dùng Flash cho tốc độ text cực nhanh
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"response_mime_type": "application/json"}
+    }
+    
+    import time
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            # Chạy request trong thread riêng để không block event loop
+            response = await asyncio.get_event_loop().run_in_executor(
+                None, lambda: requests.post(url, headers=headers, json=payload, timeout=60)
+            )
+            res_json = response.json()
+            
+            if response.status_code in [429, 503]:
+                wait_time = 10 * (attempt + 1)
+                print(f"[GEMINI TEXT ERROR {response.status_code}] Đợi {wait_time}s...")
+                await asyncio.sleep(wait_time)
+                continue
+
+            if 'candidates' not in res_json: return []
+            
+            text_res = res_json['candidates'][0]['content']['parts'][0]['text'].strip()
+            if text_res.startswith("```json"): text_res = text_res[7:-3].strip()
+            elif text_res.startswith("```"): text_res = text_res[3:-3].strip()
+            
+            parsed = json.loads(text_res)
+            return parsed.get("results", []) if isinstance(parsed, dict) else parsed
+            
+        except Exception as e:
+            print(f"[GEMINI TEXT EXCEPTION] Lần {attempt+1}: {str(e)}")
+            await asyncio.sleep(5)
+            
+    return []
+
 def extract_text_from_images_gemini(image_paths: List[str], api_key: str, custom_prompt: str = None):
     """Gửi nhiều ảnh lên Google Gemini 1.5 Flash để trích xuất text hàng loạt"""
     if not api_key: return []
@@ -581,18 +971,16 @@ def extract_text_from_images_gemini(image_paths: List[str], api_key: str, custom
             response = requests.post(url, headers=headers, json=payload, timeout=60)
             res_json = response.json()
             
-            # Xử lý Rate Limit (429)
-            if response.status_code == 429:
-                wait_time = 15 # Mặc định đợi 15s cho Gemini Free
-                error_msg = ""
-                if isinstance(res_json, dict):
-                    error_msg = res_json.get("error", {}).get("message", "")
-                print(f"[GEMINI RATE LIMIT] Waiting {wait_time}s before retry... ({error_msg})")
+            # Xử lý Rate Limit (429) và Service Unavailable (503)
+            if response.status_code in [429, 503]:
+                wait_time = 10 * (attempt + 1) 
+                error_msg = res_json.get("error", {}).get("message", "N/A") if isinstance(res_json, dict) else str(response.status_code)
+                print(f"[GEMINI ERROR {response.status_code}] Đang đợi {wait_time}s trước khi thử lại lần {attempt+1}... ({error_msg})")
                 time.sleep(wait_time)
                 continue
 
             if isinstance(res_json, list) or 'candidates' not in res_json:
-                print(f"[GEMINI ERROR] Unexpected response format: {json.dumps(res_json)[:200]}")
+                print(f"[GEMINI ERROR] Cấu trúc phản hồi lạ: {json.dumps(res_json)[:200]}")
                 return []
             
             text_res = res_json['candidates'][0]['content']['parts'][0]['text']
@@ -847,27 +1235,6 @@ def delete_draft(subject: str, tool_type: str):
         os.remove(path)
 
 # Models với Validation cơ bản
-class SourceModel(BaseModel):
-    id: str
-    name: str
-    url: str
-    subject: str
-    enabled: bool = True
-
-class Config(BaseModel):
-    USERNAME: str
-    PASSWORD: str
-    AI_PROVIDER: str = "gemini"
-    GEMINI_API_KEY: str = ""
-    GROQ_API_KEY: str = ""
-    SOURCES: List[dict] = []
-    IMAGES_DIR: str = "images"
-    IMAGES_WORD_DIR: str = "images_word"
-    ENABLE_WORD_EXPORT: bool = False
-    ENABLE_OCR_CLASSIFY: bool = False
-    PAGE_TIMEOUT: int = 60
-    REQUEST_DELAY: int = 2
-
 
 # Helpers
 def load_config_data():
@@ -933,7 +1300,7 @@ async def get_config():
 
 @app.post("/api/config")
 async def update_config(config: Config):
-    save_config_data(config.dict())
+    save_config_data(config.model_dump())
     return {"message": "Config updated successfully"}
 
 @app.get("/api/status")

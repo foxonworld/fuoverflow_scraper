@@ -1,5 +1,13 @@
+# Required packages for the Lite version
+fastapi
+uvicorn[standard]
+pydantic
+requests
+psutil
+beautifulsoup4
+lxml
 selenium
 webdriver-manager
-google-genai
 Pillow
-requests
+aiofiles
+python-multipart

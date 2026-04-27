@@ -402,6 +402,7 @@
                             <option value="">-- Chọn môn để đối soát --</option>
                         </select>
                         <button class="btn btn-primary" onclick="openAuditSelection()">🛡️ Bắt đầu quét Comment</button>
+                        <button class="btn btn-success" onclick="startSmartRefine()" style="background: linear-gradient(135deg, #6c5ce7, #a29bfe); border: none;">🪄 Smart Answer Refine</button>
                     </div>
                 </div>
             </div>
@@ -694,9 +695,23 @@
         }
 
         async function deleteSubject(name) {
-            if(!confirm(`Xóa vĩnh viễn môn ${name}?`)) return;
-            await fetch(`/api/data/subjects/${name}`, { method: 'DELETE' });
-            loadSubjects();
+            if(!confirm(`⚠️ CẢNH BÁO: Hành động này sẽ xóa vĩnh viễn môn ${name} và các ảnh không dùng chung. Bạn có chắc chắn?`)) return;
+            
+            try {
+                const res = await fetch(`/api/data/subjects/${name}`, { method: 'DELETE' });
+                const result = await res.json();
+                
+                if (res.ok) {
+                    alert(`✅ Đã xóa thành công môn: ${name}\n` + 
+                          `📸 Số ảnh đã dọn dẹp: ${result.images_cleaned}\n` + 
+                          `🛡️ Số ảnh giữ lại (đang dùng chung): ${result.shared_images_kept}`);
+                    loadSubjects();
+                } else {
+                    alert("Lỗi: " + result.detail);
+                }
+            } catch (err) {
+                alert("Lỗi kết nối: " + err);
+            }
         }
 
         async function viewSubject(name) {
@@ -1217,6 +1232,12 @@
             pollAIProgress();
         }
 
+        async function openAuditSelection() {
+            const subject = document.getElementById('auditor-subject-select').value;
+            if (!subject) return alert("Vui lòng chọn môn để đối soát!");
+            showAuditResults(subject);
+        }
+
         async function showAuditResults(subject) {
             crawlerWorkflow.currentReviewSubject = subject;
             
@@ -1224,21 +1245,196 @@
             const container = document.getElementById('audit-results-container');
             const status = document.getElementById('audit-review-status');
             modal.classList.add('active');
-            container.innerHTML = '<div style="text-align:center; padding:50px;">⏳ Đang kiểm tra bản nháp hoặc quét dữ liệu mới...</div>';
+            container.innerHTML = '<div style="text-align:center; padding:50px;">⏳ Đang kiểm tra bản nháp hoặc tìm kiếm Thread đối soát...</div>';
 
-            // Check if results already exist in draft/memory
+            // 1. Kiểm tra xem đã có bản nháp cũ chưa
             const res = await fetch(`/api/audit/subjects/${subject}/results`);
             const results = await res.json();
             
             if (results && results.length > 0) {
                 renderAuditList(subject, results);
             } else {
-                // If no results, start a new scan
-                const resScan = await fetch(`/api/audit/subjects/${subject}/scan`, { method: 'POST' });
-                if (resScan.ok) {
-                    status.innerHTML = '<span class="status-dot dot-running"></span> Đang cào comment...';
-                    pollAuditStatus(subject);
+                // 2. Nếu chưa có, tự động tìm kiếm Threads liên quan
+                status.innerText = "🔍 Đang tìm kiếm các Thread liên quan...";
+                const resThreads = await fetch(`/api/audit/subjects/${subject}/threads`);
+                const threads = await resThreads.json();
+                const urls = threads.map(t => t.url);
+                
+                if (urls.length === 0) {
+                    container.innerHTML = '<div style="text-align:center; padding:50px; color:var(--danger);">❌ Không tìm thấy Thread nào trong config phù hợp với ảnh của môn này. Vui lòng kiểm tra config.json.</div>';
+                    return;
                 }
+
+                // 3. Gửi yêu cầu Scan với danh sách URL
+                const resScan = await fetch(`/api/audit/subjects/${subject}/scan`, { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ urls: urls })
+                });
+                
+                if (resScan.ok) {
+                    status.innerHTML = '<span class="status-dot dot-running"></span> Đang cào comment từ ' + urls.length + ' threads...';
+                    pollAuditStatus(subject);
+                } else {
+                    const err = await resScan.json();
+                    alert("Lỗi Scan: " + (err.detail || "Không xác định"));
+                }
+            }
+        }
+
+        // --- NEW: Smart Refine Functions ---
+        async function startSmartRefine() {
+            const subject = document.getElementById('auditor-subject-select').value;
+            if (!subject) return alert("Vui lòng chọn môn!");
+            
+            if (!confirm("🪄 Smart Refine sẽ quét comment và dùng AI thẩm định các câu nghi vấn. Quá trình này có thể tốn thời gian. Bắt đầu?")) return;
+
+            const resThreads = await fetch(`/api/audit/subjects/${subject}/threads`);
+            const threads = await resThreads.json();
+            const urls = threads.map(t => t.url);
+
+            const res = await fetch(`/api/audit/subjects/${subject}/smart/start`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ urls: urls })
+            });
+            
+            if (res.ok) {
+                alert("🚀 Đã khởi chạy Smart Refine ngầm. Bạn có thể theo dõi qua log.");
+                showSmartAuditResults(subject);
+            }
+        }
+
+        async function showSmartAuditResults(subject) {
+            const modal = document.getElementById('audit-review-modal');
+            const container = document.getElementById('audit-results-container');
+            const status = document.getElementById('audit-review-status');
+            
+            modal.classList.add('active');
+            status.innerText = "🪄 Đang tải kết quả Hậu kiểm Thông minh...";
+            
+            const res = await fetch(`/api/audit/subjects/${subject}/smart/results`);
+            const results = await res.json();
+            
+            if (!results) {
+                container.innerHTML = '<div style="text-align:center; padding:50px;">⏳ Hệ thống đang xử lý... Vui lòng đợi trong giây lát.</div>';
+                setTimeout(() => showSmartAuditResults(subject), 5000);
+                return;
+            }
+            
+            renderSmartAuditList(subject, results);
+        }
+
+        function renderSmartAuditList(subject, results) {
+            const container = document.getElementById('audit-results-container');
+            const status = document.getElementById('audit-review-status');
+            
+            if (results.length === 0) {
+                container.innerHTML = '<div class="alert alert-success">✅ Không có câu hỏi nào cần hậu kiểm thông minh! Tất cả đều ổn.</div>';
+                status.innerText = "Hoàn tất";
+                return;
+            }
+
+            let html = `
+                <div style="margin-bottom: 15px; display:flex; justify-content: space-between; align-items:center;">
+                    <p>Tìm thấy <b>${results.length}</b> câu nghi vấn cần bạn duyệt.</p>
+                    <button class="btn btn-success" onclick="applySmartChanges('${subject}')">✅ Áp dụng tất cả đề xuất AI</button>
+                </div>
+                <table class="table">
+                    <thead>
+                        <tr>
+                            <th>Ảnh</th>
+                            <th>Đáp án cũ</th>
+                            <th>Cộng đồng</th>
+                            <th>AI Đề xuất</th>
+                            <th style="width: 150px;">Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+            `;
+
+            results.forEach(item => {
+                const isMatch = item.ai_ans === item.comment_ans && item.ai_ans !== 'N/A';
+                const rowClass = isMatch ? 'style="background: rgba(46, 213, 115, 0.05)"' : '';
+                
+                // Chuẩn hóa đường dẫn ảnh: Thay \ thành / và tránh lặp images/
+                let cleanImg = item.img.replace(/\\/g, '/');
+                if (cleanImg.startsWith('images/')) cleanImg = cleanImg.substring(7);
+                const imgPath = item.img.startsWith('http') ? item.img : `/images/${cleanImg}`;
+                
+                html += `
+                    <tr ${rowClass}>
+                        <td style="padding: 12px;">
+                            <div style="position:relative; width: 140px; height: 80px; overflow:hidden; border-radius:8px; border: 1px solid rgba(255,255,255,0.1); cursor: zoom-in;" 
+                                 onclick="window.open('${imgPath}', '_blank')">
+                                <img src="${imgPath}" style="width:100%; height:100%; object-fit:cover;">
+                                <div style="position:absolute; bottom:0; width:100%; background:rgba(0,0,0,0.6); color:#fff; font-size:10px; text-align:center; padding:2px;">
+                                    Click để xem ảnh
+                                </div>
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-muted); margin-top:6px; font-family:monospace;">ID: ${item.id}</div>
+                        </td>
+                        <td style="text-align:center; vertical-align: middle;">
+                            <div style="font-size:1.2em; font-weight:bold; color:#ecf0f1;">${item.old_ans || '?'}</div>
+                            <div style="font-size:10px; color:var(--text-muted);">HIỆN TẠI</div>
+                        </td>
+                        <td style="vertical-align: middle; padding: 10px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <div class="badge ${item.comment_ans === 'N/A' ? 'badge-secondary' : 'badge-warning'}" style="font-size:1em;">${item.comment_ans}</div>
+                                <span style="font-size:11px; color:var(--text-muted);">Cộng đồng</span>
+                            </div>
+                            <div style="font-size:10px; margin-top:8px; color:rgba(255,255,255,0.4); font-family:monospace;">Votes: ${JSON.stringify(item.comment_votes)}</div>
+                        </td>
+                        <td style="vertical-align: middle; padding: 10px;">
+                            <div style="display:flex; align-items:center; gap:8px;">
+                                <div class="badge badge-success" style="font-size: 1.1em; background: #27ae60;">${item.ai_ans}</div>
+                                <span style="font-size:11px; color:var(--text-muted);">AI Phán quyết</span>
+                            </div>
+                            <div style="font-size:11px; margin-top:8px; font-style: italic; color: #bdc3c7; max-width: 300px; line-height:1.4;">
+                                💡 ${item.explanation}
+                            </div>
+                        </td>
+                        <td style="vertical-align: middle; padding: 12px;">
+                            <label style="font-size:11px; color:var(--text-muted); display:block; margin-bottom:5px;">CHỐT ĐÁP ÁN:</label>
+                            <select class="form-control smart-ans-select" data-id="${item.id}" style="border-color: var(--accent); background: rgba(108, 92, 231, 0.1);">
+                                <option value="${item.ai_ans}" selected>✅ Theo AI (${item.ai_ans})</option>
+                                <option value="${item.comment_ans}">👥 Theo Cmt (${item.comment_ans})</option>
+                                <option value="${item.old_ans}">🔄 Giữ cũ (${item.old_ans})</option>
+                                <option value="A">Chọn A</option>
+                                <option value="B">Chọn B</option>
+                                <option value="C">Chọn C</option>
+                                <option value="D">Chọn D</option>
+                                <option value="TF">Chọn True/False</option>
+                            </select>
+                        </td>
+                    </tr>
+                `;
+            });
+
+            html += '</tbody></table>';
+            container.innerHTML = html;
+            status.innerText = "🪄 Sẵn sàng duyệt";
+        }
+
+        async function applySmartChanges(subject) {
+            const selects = document.querySelectorAll('.smart-ans-select');
+            const changes = {};
+            selects.forEach(s => {
+                changes[s.dataset.id] = s.value;
+            });
+
+            if (!confirm(`Bạn chắc chắn muốn cập nhật ${Object.keys(changes).length} câu hỏi?`)) return;
+
+            const res = await fetch(`/api/audit/subjects/${subject}/smart/apply`, {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(changes)
+            });
+
+            if (res.ok) {
+                alert("✨ Đã cập nhật đáp án thành công!");
+                closeModal('audit-review-modal');
+                loadSubjects();
             }
         }
 
@@ -1276,7 +1472,7 @@
                 <div class="card" style="margin-bottom:15px; border-left: 4px solid var(--warning);">
                     <div style="display:flex; gap:20px;">
                         <div style="width:200px;">
-                            <img src="/static/${r.img}" style="width:100%; border-radius:8px;">
+                            <img src="/static/${r.img.replace(/\\/g, '/')}" style="width:100%; border-radius:8px;">
                         </div>
                         <div style="flex:1;">
                             <div style="font-weight:700; margin-bottom:10px;">Conflict tại ID #${r.id}</div>
