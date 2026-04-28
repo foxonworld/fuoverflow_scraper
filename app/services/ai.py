@@ -157,15 +157,40 @@ def _call_gemini_raw(
 
 
 async def ask_raw_text(prompt: str) -> str:
-    """Gửi prompt và nhận về văn bản thô từ AI provider."""
-    from .storage import load_config
+    """Gửi prompt và nhận về văn bản thô từ AI provider (hỗ trợ chuyển đổi provider)."""
     cfg = load_config()
-    api_key = cfg.get("GEMINI_API_KEY", "")
-    if not api_key: return ""
+    provider = cfg.get("AI_PROVIDER", "gemini")
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        None, _call_gemini_raw, api_key, [{"text": prompt}]
-    )
+    
+    # Ưu tiên lấy key theo provider đã chọn
+    gemini_key = cfg.get("GEMINI_API_KEY", "").strip()
+    groq_key = cfg.get("GROQ_API_KEY", "").strip()
+
+    async def _try_call(p, k):
+        if p == "gemini" and k:
+            return await loop.run_in_executor(None, _call_gemini_raw, k, [{"text": prompt}])
+        elif p == "groq" and k:
+            # Groq không có hàm raw riêng, dùng hàm list rồi lấy text
+            res = await loop.run_in_executor(None, _call_groq, k, [{"type": "text", "text": prompt}])
+            if res and isinstance(res, list) and len(res) > 0:
+                return str(res[0])
+            # Nếu Groq trả về chuỗi trực tiếp (tùy version _parse_json_result)
+            return ""
+        return ""
+
+    # Thử provider chính
+    primary_key = gemini_key if provider == "gemini" else groq_key
+    result = await _try_call(provider, primary_key)
+    
+    # Nếu thất bại và có provider phụ, thử fallback
+    if not result:
+        fallback_provider = "groq" if provider == "gemini" else "gemini"
+        fallback_key = groq_key if provider == "gemini" else gemini_key
+        if fallback_key:
+            logger.info(f"🔄 Switching to fallback provider: {fallback_provider}")
+            result = await _try_call(fallback_provider, fallback_key)
+            
+    return result or ""
 
 
 # ─────────────────────────────────────────────────────────────────────────────

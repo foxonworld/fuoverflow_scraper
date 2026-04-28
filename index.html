@@ -1314,11 +1314,122 @@
             backdrop-filter: blur(8px);
         }
         #fs-inline-score { font-size: 14px; font-family: var(--font-mono); }
-        #fs-inline-progress { font-size: 13px; font-family: var(--font-mono); }
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+        .animate-spin { animation: spin 1s linear infinite; }
+
+        /* Search Results Styles */
+        .search-card {
+            background: var(--card-bg);
+            border: 3px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            box-shadow: 4px 4px 0 var(--border);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+        }
+        .search-card:hover { transform: translate(-2px, -2px); box-shadow: 6px 6px 0 var(--border); }
+        .search-card img { width: 100%; height: 160px; object-fit: cover; border-bottom: 2px solid var(--border); background: #f1f5f9; }
+        .search-card-info { padding: 10px; font-size: 13px; }
+        .search-card-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 5px; }
+        .search-tag-ans { background: var(--success); color: white; padding: 2px 8px; border-radius: 6px; font-weight: bold; font-family: var(--font-mono); }
+        .search-tag-sid { background: #e2e8f0; color: #475569; padding: 2px 8px; border-radius: 6px; font-weight: bold; font-size: 11px; }
+
+        /* Quick-View Modal */
+        #search-detail-modal {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.85);
+            z-index: 20000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            padding: 20px;
+            backdrop-filter: blur(5px);
+        }
+        .sdm-content {
+            background: var(--card-bg);
+            width: 98%;
+            max-width: 1400px;
+            height: 95vh;
+            border-radius: 20px;
+            border: 4px solid var(--border);
+            position: relative;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 20px 50px rgba(0,0,0,0.5);
+        }
+        .sdm-close {
+            position: absolute;
+            top: 15px; right: 15px;
+            width: 45px; height: 45px;
+            background: #e74c3c;
+            color: white;
+            border: 3px solid var(--border);
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 24px; cursor: pointer; z-index: 100;
+            box-shadow: 3px 3px 0 var(--border);
+            transition: 0.2s;
+        }
+        .sdm-close:hover { transform: scale(1.1) rotate(90deg); }
+
+        .sdm-nav {
+            position: absolute;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 60px; height: 60px;
+            background: rgba(255,255,255,0.2);
+            backdrop-filter: blur(5px);
+            color: white;
+            border-radius: 50%;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 40px; cursor: pointer; z-index: 90;
+            border: 2px solid rgba(255,255,255,0.3);
+            transition: 0.2s;
+            user-select: none;
+        }
+        .sdm-nav:hover { background: rgba(255,255,255,0.4); transform: translateY(-50%) scale(1.1); }
+        .sdm-prev { left: 20px; }
+        .sdm-next { right: 20px; }
+
+        .sdm-img-container { flex: 1; overflow: auto; background: #1a1a1a; display: flex; justify-content: center; align-items: center; position: relative; }
+        .sdm-img-container img { max-width: 100%; max-height: 100%; object-fit: contain; }
+        .sdm-footer { padding: 15px 30px; border-top: 3px solid var(--border); display: flex; justify-content: space-between; align-items: center; background: var(--card-bg); }
+        .sdm-ans { font-size: 50px; font-weight: 900; color: var(--success); font-family: var(--font-mono); text-shadow: 3px 3px 0 var(--border); }
+        .sdm-sid { font-size: 20px; font-weight: bold; color: #64748b; }
+        .sdm-counter { position: absolute; bottom: 10px; left: 50%; transform: translateX(-50%); background: rgba(0,0,0,0.5); color: white; padding: 4px 15px; border-radius: 20px; font-size: 14px; font-family: var(--font-mono); }
 
     </style>
 </head>
 <body>
+    <!-- SEARCH DETAIL MODAL -->
+    <div id="search-detail-modal">
+        <div class="sdm-content">
+            <div class="sdm-close" onclick="closeSearchDetail()">✖</div>
+            <div class="sdm-nav sdm-prev" onclick="navigateSearch(-1)">‹</div>
+            <div class="sdm-nav sdm-next" onclick="navigateSearch(1)">›</div>
+            
+            <div class="sdm-img-container">
+                <img id="sdm-img" src="" alt="Detail">
+                <div id="sdm-text" class="text-question-container" style="display:none; padding:40px; width:100%; height:100%; box-shadow:none; border:none; background:var(--card-bg);">
+                    <div id="sdm-text-q" class="text-question-content" style="font-size: 1.5em;"></div>
+                </div>
+                <div class="sdm-counter" id="sdm-counter-label">1 / 10</div>
+            </div>
+            <div class="sdm-footer">
+                <div class="sdm-sid" id="sdm-sid-label">Mã đề: ?</div>
+                <div style="display: flex; align-items: center; gap: 15px;">
+                    <span style="font-weight: bold; color: var(--secondary); font-size: 1.2em;">ĐÁP ÁN:</span>
+                    <div class="sdm-ans" id="sdm-ans-label">A</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div id="login-screen">
         <div class="login-box">
             <h2>🔑 Bảo Mật App</h2>
@@ -1429,10 +1540,38 @@
                                         <!-- JS items -->
                                     </div>
                                 </div>
+                                <div style="grid-column: 1 / -1; background: var(--bg); padding: 12px; border: 2px solid var(--border); border-radius: 12px; box-shadow: 3px 3px 0 var(--border);">
+                                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                                        <span style="font-size: 15px; font-weight: 700; color: var(--secondary);">🎯 Lọc theo đáp án:</span>
+                                        <div style="display: flex; gap: 5px;">
+                                            <button class="btn" style="padding: 2px 8px; font-size: 11px; background: #64748b; color: #fff;" onclick="toggleAnsFilters(true, '.exam-ans-cb')">Tất cả</button>
+                                            <button class="btn" style="padding: 2px 8px; font-size: 11px; background: #94a3b8; color: #fff;" onclick="toggleAnsFilters(false, '.exam-ans-cb')">Bỏ hết</button>
+                                        </div>
+                                    </div>
+                                    <div style="display: flex; gap: 15px; font-weight: bold; color: var(--text); font-size: 16px; justify-content: center;">
+                                        <label style="cursor: pointer; display: flex; align-items: center; gap: 6px;"><input type="checkbox" value="A" class="exam-ans-cb" checked> A</label>
+                                        <label style="cursor: pointer; display: flex; align-items: center; gap: 6px;"><input type="checkbox" value="B" class="exam-ans-cb" checked> B</label>
+                                        <label style="cursor: pointer; display: flex; align-items: center; gap: 6px;"><input type="checkbox" value="C" class="exam-ans-cb" checked> C</label>
+                                        <label style="cursor: pointer; display: flex; align-items: center; gap: 6px;"><input type="checkbox" value="D" class="exam-ans-cb" checked> D</label>
+                                    </div>
+                                </div>
                             </div>
 
-                            <div class="btn-group">
-                                <button class="btn primary" onclick="startQuiz(false)">🎯 BẮT ĐẦU THI THỬ</button>
+                            <div class="btn-group" style="flex-wrap: wrap;">
+                                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; width: 100%; margin-bottom: 10px;">
+                                    <button class="btn primary" onclick="startQuiz(false, 'new')" style="padding: 10px; font-size: 15px; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                                        <span>🎯 THI CÂU MỚI</span>
+                                        <small style="font-size: 9px; opacity: 0.9;">(Chưa từng làm)</small>
+                                    </button>
+                                    <button class="btn" onclick="startQuiz(false, 'old')" style="padding: 10px; font-size: 15px; background: #64748b; color: white; display: flex; flex-direction: column; align-items: center; gap: 4px;">
+                                        <span>🔄 ÔN TẬP CÂU CŨ</span>
+                                        <small style="font-size: 9px; opacity: 0.9;">(Đã gặp qua)</small>
+                                    </button>
+                                </div>
+                                <button class="btn" onclick="startQuiz(false, 'bookmark')" style="width: 100%; padding: 12px; font-size: 16px; background: #f59e0b; color: white; display: flex; align-items: center; justify-content: center; gap: 8px; margin-bottom: 10px; border-color: #d97706;">
+                                    <span>⭐ CÀY CÂU ĐÁNH DẤU</span>
+                                    <span id="exam-bookmark-count" style="background: rgba(255,255,255,0.2); padding: 2px 8px; border-radius: 10px; font-size: 12px; font-weight: bold;">0</span>
+                                </button>
                                 <div style="display: flex; flex-direction: column; gap: 10px; flex: 1; min-width: 200px;">
                                     <button class="btn secondary" style="width: 100%; justify-content: center;" onclick="bootStudyHub()">📚 Học tập chuyên sâu</button>
                                     <button class="btn tertiary" id="btn-home-retry-wrong" style="display:none; width: 100%; justify-content: center;" onclick="startQuiz(true)">🔄 Luyện lại <span id="wrong-count-badge" style="background:#fff; color:var(--danger); padding:2px 8px; border-radius:10px; margin-left:5px; font-size:14px;">0</span> câu sai</button>
@@ -1568,9 +1707,47 @@
                     <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;"><input type="checkbox" value="2" class="study-type-cb" checked onchange="applyStudyFilter()"> Multi (2+)</label>
                     <label style="cursor: pointer; display: flex; align-items: center; gap: 5px;"><input type="checkbox" value="tf" class="study-type-cb" checked onchange="applyStudyFilter()"> True/False</label>
                 </div>
+
+                <div class="answer-filter-group" style="display: flex; gap: 10px; align-items: center; background: var(--bg); padding: 5px 15px; border-radius: 12px; border: 2px solid var(--border); box-shadow: 2px 2px 0 var(--border);">
+                    <span style="font-weight: bold; font-size: 14px; color: var(--secondary);">🎯 Lọc Đáp Án:</span>
+                    <div style="display: flex; gap: 12px; font-weight: bold;">
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" value="A" class="ans-filter-cb" checked onchange="applyStudyFilter()"> A</label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" value="B" class="ans-filter-cb" checked onchange="applyStudyFilter()"> B</label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" value="C" class="ans-filter-cb" checked onchange="applyStudyFilter()"> C</label>
+                        <label style="cursor: pointer; display: flex; align-items: center; gap: 4px;"><input type="checkbox" value="D" class="ans-filter-cb" checked onchange="applyStudyFilter()"> D</label>
+                    </div>
+                    <div style="display: flex; gap: 5px; margin-left: 10px;">
+                        <button class="btn" style="padding: 2px 8px; font-size: 11px; background: #64748b; color: #fff;" onclick="toggleAnsFilters(true, '.ans-filter-cb', true)">Tất cả</button>
+                        <button class="btn" style="padding: 2px 8px; font-size: 11px; background: #94a3b8; color: #fff;" onclick="toggleAnsFilters(false, '.ans-filter-cb', true)">Bỏ hết</button>
+                    </div>
+                </div>
                 
                 <div class="stats" id="study-stats" style="margin-left: auto; background: #e8f8f5; color: #16a085;">
                     Tiến độ: 0 / 0 | 0 ⭐
+                </div>
+            </div>
+
+            <!-- SMART SEARCH BAR -->
+            <div style="margin: 15px 0; display: flex; gap: 10px;">
+                <div style="flex: 1; position: relative;">
+                    <input type="text" id="smart-search-input" placeholder="🔍 Nhập ý tưởng tìm kiếm (ví dụ: các câu về mốc thời gian, tên nhân vật...)" 
+                           style="width: 100%; padding: 12px 15px; border-radius: 12px; border: 3px solid var(--border); font-size: 16px; font-family: var(--font-main); box-shadow: 4px 4px 0 var(--border); outline: none;"
+                           onkeydown="if(event.key==='Enter') triggerSmartSearch()">
+                    <div id="search-loading" style="display: none; position: absolute; right: 15px; top: 50%; transform: translateY(-50%); color: var(--primary);">
+                        <svg class="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></svg>
+                    </div>
+                </div>
+                <button class="btn primary" onclick="triggerSmartSearch()" style="padding: 0 25px; font-weight: bold; font-size: 16px;">🤖 AI SEARCH</button>
+            </div>
+
+            <!-- SEARCH RESULTS AREA -->
+            <div id="search-results-area" style="display: none; margin-bottom: 25px;">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
+                    <h3 style="margin: 0; color: var(--secondary);">✨ Kết quả tìm kiếm AI</h3>
+                    <button class="btn" style="padding: 4px 12px; font-size: 13px; background: #94a3b8; color: #fff;" onclick="closeSmartSearch()">✖ Đóng kết quả</button>
+                </div>
+                <div id="search-results-list" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 15px;">
+                    <!-- Items go here -->
                 </div>
             </div>
             
@@ -1629,30 +1806,70 @@
         // ==========================================
         //  COMPATIBILITY LAYER: TEXT & QUIZLET ADAPTER
         // ==========================================
-        function normalizeQuestion(q) {
-            if (!q || q.type !== "text") return q;
-            if (q._normalized) return q; // Tránh normalize nhiều lần
+        const normalizeAnswer = (ans) => {
+            if (!ans) return [];
+            return [...new Set(
+                ans.toString().toUpperCase()
+                   .replace(/[^A-D]/g, '')
+                   .split('')
+            )];
+        };
 
-            const lines = (q.question || "").split('\n');
-            const questionText = lines[0];
-            const options = {};
+        const isAnswerMatch = (normalized, selected) => {
+            if (!selected || selected.length === 0) return true;
+            return normalized.some(a => selected.includes(a));
+        };
+
+        function getQuestionFingerprint(q) {
+            const text = (q.questionText || q.question || "").toString().toLowerCase();
+            const noise = ["choose", "answer", "select", "question", "one", "correct", "fuoverflow", "com", "www", "final", "test", "exam"];
             
-            // Regex bốc tách (a) Nội dung -> { A: "Nội dung" }
-            lines.slice(1).forEach(line => {
-                const match = line.match(/^\(([a-d])\)\s(.*)/i);
-                if (match) {
-                    options[match[1].toUpperCase()] = match[2].trim();
-                }
-            });
+            // 1. Loại bỏ markdown và ký tự đặc biệt
+            let clean = text.replace(/[*#_()[\]]/g, " ")
+                            .replace(/[^\w\sàáảãạâầấẩẫậăằắẳẵặèéẻẽẹêềếểễệđìíỉĩịòóỏõọôồốổỗộơờớởỡợùúủũụưừứửữựỳýỷỹỵ]/g, " ");
+            
+            // 2. Chia thành mảng từ, lọc từ nhiễu và từ quá ngắn
+            let words = clean.split(/\s+/)
+                             .filter(w => w.length > 1 && !noise.includes(w));
+            
+            // 3. Sắp xếp alphabet và nối lại để triệt tiêu sự khác biệt về thứ tự từ hoặc dấu cách
+            return words.sort().join("");
+        }
 
-            return {
-                ...q,
-                questionText: questionText,
-                optionsData: options, 
-                ans: (q.answer || "").toUpperCase(),
-                _normalized: true,
-                img: q.img || "TEXT_MODE_" + q.idx // Fake URL for bookmark tracking key
-            };
+        function toggleAnsFilters(checked, selector, triggerFilter) {
+            document.querySelectorAll(selector).forEach(cb => cb.checked = checked);
+            if (triggerFilter) applyStudyFilter();
+        }
+
+        function normalizeQuestion(q) {
+            if (!q) return q;
+            
+            let normalized = q;
+            if (q.type === "text" && !q._normalized) {
+                const lines = (q.question || "").split('\n');
+                const questionText = lines[0];
+                const options = {};
+                
+                lines.slice(1).forEach(line => {
+                    const match = line.match(/^\(([a-d])\)\s(.*)/i);
+                    if (match) {
+                        options[match[1].toUpperCase()] = match[2].trim();
+                    }
+                });
+
+                normalized = {
+                    ...q,
+                    questionText: questionText,
+                    optionsData: options, 
+                    ans: (q.answer || "").toUpperCase(),
+                    _normalized: true,
+                    img: q.img || "TEXT_MODE_" + q.idx
+                };
+            }
+
+            // Pre-process answer for all questions
+            normalized._normalizedAnswer = normalizeAnswer(normalized.ans || normalized.answer);
+            return normalized;
         }
 
         // ==========================================
@@ -1664,6 +1881,12 @@
         let progressChartInstance = null;
 
         window.onload = function() {
+            // Khởi tạo Mapping nguồn sớm nhất có thể
+            fetch('/api/source_mapping').then(r => r.json()).then(data => {
+                globalSourceMapping = data;
+                onSubjectChange(); // Refresh UI with mapping
+            }).catch(e => console.warn("Cannot load mapping:", e));
+
             let selectEl = document.getElementById("subject-select");
             if (typeof quizData === 'undefined') {
                 if(selectEl) selectEl.innerHTML = '<option value="">⚠️ Chưa có dữ liệu. Hãy chạy Robot cào thẻo trước!</option>';
@@ -1720,18 +1943,26 @@
             
             configArea.style.display = "block";
             if(backupArea) backupArea.style.display = "block";
+            
+            // Cập nhật số lượng câu đánh dấu
+            const bcount = document.getElementById("exam-bookmark-count");
+            if (bcount) {
+                loadStudyState(); // Đảm bảo lấy state mới nhất của môn này
+                bcount.innerText = studyState.bookmarked.length;
+            }
             let sets = new Set();
             rd.forEach(q => {
                 let filename = q.img.substring(q.img.lastIndexOf('/') + 1);
-                let setName = filename.split('_q')[0];
-                if (setName.startsWith("NEW_TEST_")) setName = setName.substring(9);
-                sets.add(setName);
+                let sid = q.source_id || filename.split('_q')[0];
+                if (sid.startsWith("NEW_TEST_")) sid = sid.substring(9);
+                sets.add(sid);
             });
-            let sortedSets = Array.from(sets).sort();
+            let sortedSets = Array.from(sets).sort((a, b) => getSourceScore(b) - getSourceScore(a));
             
             let html = `<label style="display: block; margin-bottom: 8px; font-weight: bold; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; cursor: pointer;"><input type="checkbox" id="check-all-sets" checked onchange="toggleAllSets(this)" style="transform: scale(1.2); margin-right: 8px;"> 🎲 [TRỘN CÂU HỎI TOÀN KHO]</label>`;
             sortedSets.forEach(s => {
-                html += `<label style="display: block; margin-bottom: 6px; margin-left: 10px; cursor: pointer; color: #475569;"><input type="checkbox" class="set-checkbox" value="${s}" checked onchange="checkIndividualSet()" style="transform: scale(1.1); margin-right: 8px;"> Đề gốc: ${s}</label>`;
+                let displayName = globalSourceMapping[s] || s;
+                html += `<label style="display: block; margin-bottom: 6px; margin-left: 10px; cursor: pointer; color: #475569;"><input type="checkbox" class="set-checkbox" value="${s}" checked onchange="checkIndividualSet()" style="transform: scale(1.1); margin-right: 8px;"> Đề gốc: ${displayName}</label>`;
             });
             boxArea.innerHTML = html;
             
@@ -1966,6 +2197,31 @@
             return data.map(q => normalizeQuestion(q));
         }
 
+        function getSourceScore(s) {
+            if (!s) return 0;
+            s = s.toString().toLowerCase();
+            
+            let year = 0;
+            let semMatch = s.match(/(sp|fa|su)\s*(\d{2,4})/);
+            if (semMatch) {
+                year = parseInt(semMatch[2]);
+            } else {
+                let year4d = s.match(/(20\d{2})/);
+                if (year4d) year = parseInt(year4d[1]);
+            }
+            if (year > 2000) year -= 2000;
+            
+            let semPriority = 0;
+            if (s.includes('fa')) semPriority = 3;
+            else if (s.includes('su')) semPriority = 2;
+            else if (s.includes('sp')) semPriority = 1;
+            
+            let typeBonus = (s.includes('fe') || s.includes('final')) ? 5 : 0;
+            let isRe = s.includes('re') ? -1 : 0;
+
+            return year * 1000 + semPriority * 100 + typeBonus + isRe;
+        }
+
         // ==========================================
         //  ENGINE PHẦN HỌC TẬP (V2 - MỚI CHẾ)
         // ==========================================
@@ -2006,49 +2262,23 @@
                 
                 if (p.type === "text") {
                     p.setName = "Quizlet_Set";
+                    p.sid = "Quizlet_Set";
                 } else {
                     let filename = p.img.substring(p.img.lastIndexOf('/') + 1);
-                    // Ưu tiên lấy tên đẹp từ mapping cho source_id
                     let sid = p.source_id || filename.split('_q')[0];
-                    let setName = globalSourceMapping[sid] || sid;
-                    
-                    if (setName.startsWith("NEW_TEST_")) setName = setName.substring(9);
-                    p.setName = setName;
+                    if (sid.startsWith("NEW_TEST_")) sid = sid.substring(9);
+                    p.sid = sid;
+                    p.setName = globalSourceMapping[sid] || sid;
                 }
-                p.ansLen = p.ans.length;
-                sets.add(p.setName);
+                p.ansLen = (p.ans || "").length;
+                sets.add(p.sid);
                 return p;
             });
             
-            function getSourceScore(s) {
-                if (!s) return 0;
-                s = s.toLowerCase();
-                
-                let year = 0;
-                let semMatch = s.match(/(sp|fa|su)\s*(\d{2,4})/);
-                if (semMatch) {
-                    year = parseInt(semMatch[2]);
-                } else {
-                    let year4d = s.match(/(20\d{2})/);
-                    if (year4d) year = parseInt(year4d[1]);
-                }
-                if (year > 2000) year -= 2000;
-                
-                let semPriority = 0;
-                if (s.includes('fa')) semPriority = 3;
-                else if (s.includes('su')) semPriority = 2;
-                else if (s.includes('sp')) semPriority = 1;
-                
-                let typeBonus = (s.includes('fe') || s.includes('final')) ? 5 : 0;
-                let isRe = s.includes('re') ? -1 : 0;
-
-                return year * 1000 + semPriority * 100 + typeBonus + isRe;
-            }
-
             // SẮP XẾP TOÀN BỘ CÂU HỎI THEO THỜI GIAN CỦA SET
             globalStudyQuestions.sort((a, b) => {
-                let scoreA = getSourceScore(a.setName);
-                let scoreB = getSourceScore(b.setName);
+                let scoreA = getSourceScore(a.sid);
+                let scoreB = getSourceScore(b.sid);
                 if (scoreB !== scoreA) return scoreB - scoreA;
                 return a.img.localeCompare(b.img); 
             });
@@ -2086,31 +2316,43 @@
             let fValStr = document.getElementById("filter-value").value;
             let valDropdown = document.getElementById("filter-value");
             
-            if (fType === "all") {
+            // 1. Base Filter (Type: All, Bookmarked, Set)
+            let basePool = [...globalStudyQuestions];
+            if (fType === "bookmarked") {
                 valDropdown.style.display = "none";
-                filteredStudyQuestions = [...globalStudyQuestions];
-            } else if (fType === "bookmarked") {
-                valDropdown.style.display = "none";
-                filteredStudyQuestions = globalStudyQuestions.filter(q => studyState.bookmarked.includes(q.img));
+                basePool = globalStudyQuestions.filter(q => studyState.bookmarked.includes(q.img));
             } else if (fType === "set") {
                 let pureSet = fValStr.replace("set_", "");
                 valDropdown.style.display = "inline-block";
                 Array.from(valDropdown.options).forEach(opt => { opt.style.display = opt.value.startsWith("set_") ? "block" : "none"; });
                 if (!fValStr.startsWith("set_")) { 
-                    valDropdown.value = Array.from(valDropdown.options).find(o => o.value.startsWith("set_")).value; 
-                    pureSet = valDropdown.value.replace("set_", ""); 
+                    let firstSetOpt = Array.from(valDropdown.options).find(o => o.value.startsWith("set_"));
+                    if (firstSetOpt) {
+                        valDropdown.value = firstSetOpt.value; 
+                        pureSet = valDropdown.value.replace("set_", ""); 
+                    }
                 }
-                filteredStudyQuestions = globalStudyQuestions.filter(q => q.setName === pureSet);
+                basePool = globalStudyQuestions.filter(q => q.sid === pureSet);
+            } else {
+                valDropdown.style.display = "none";
             }
             
+            // 2. Advanced Filters (Format & Answers)
             let allowedStudyTypes = Array.from(document.querySelectorAll(".study-type-cb:checked")).map(cb => cb.value);
-            filteredStudyQuestions = filteredStudyQuestions.filter(q => {
-                let isTF = (q.type === 'TF');
-                if (isTF) return allowedStudyTypes.includes('tf');
-                if (q.ansLen === 1) return allowedStudyTypes.includes('1');
-                if (q.ansLen > 1) return allowedStudyTypes.includes('2');
-                return true; 
-            });
+            let selectedAns = Array.from(document.querySelectorAll(".ans-filter-cb:checked")).map(cb => cb.value);
+
+            const filterPipeline = [
+                (q) => {
+                    let isTF = (q.type === 'TF');
+                    if (isTF) return allowedStudyTypes.includes('tf');
+                    if (q.ansLen === 1) return allowedStudyTypes.includes('1');
+                    if (q.ansLen > 1) return allowedStudyTypes.includes('2');
+                    return true;
+                },
+                (q) => isAnswerMatch(q._normalizedAnswer, selectedAns)
+            ];
+
+            filteredStudyQuestions = basePool.filter(q => filterPipeline.every(fn => fn(q)));
             
             renderStudyGrid();
         }
@@ -2139,8 +2381,161 @@
             let tv = studyState.viewed.length;
             let tb = studyState.bookmarked.length;
             let tt = globalStudyQuestions.length;
+            let tf = filteredStudyQuestions.length;
             let percentDone = Math.round((tv/tt)*100) || 0;
-            document.getElementById("study-stats").innerText = `Tiến độ: Hoàn tất ${percentDone}% (${tv}/${tt}) | Star: ${tb} ⭐`;
+            
+            let activeAns = Array.from(document.querySelectorAll(".ans-filter-cb:checked")).map(cb => cb.value).join(", ") || "None";
+            document.getElementById("study-stats").innerText = `Đang hiện: ${tf}/${tt} | Filter: [${activeAns}] | Hoàn tất ${percentDone}% | ⭐ ${tb}`;
+        }
+
+        // ==========================================
+        //  SMART AI SEARCH LOGIC
+        // ==========================================
+        let currentSearchItems = [];
+        let currentSearchIdx = 0;
+
+        async function triggerSmartSearch() {
+            const query = document.getElementById("smart-search-input").value.trim();
+            const subject = document.getElementById("subject-select").value;
+            
+            if (!query) return;
+            if (!subject) return alert("Vui lòng chọn môn học trước!");
+            
+            const loading = document.getElementById("search-loading");
+            const resultsArea = document.getElementById("search-results-area");
+            const resultsList = document.getElementById("search-results-list");
+            
+            loading.style.display = "block";
+            resultsArea.style.display = "block";
+            resultsList.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #64748b;">🧠 Đang phân tích ngữ nghĩa và mở rộng từ khóa...</div>';
+            
+            try {
+                const res = await fetch('/api/search/smart', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ subject, query })
+                });
+                const data = await res.json();
+                
+                if (data.results && data.results.length > 0) {
+                    currentSearchItems = data.results;
+                    renderSearchResults(data.results);
+                } else {
+                    currentSearchItems = [];
+                    resultsList.innerHTML = '<div style="grid-column: 1/-1; text-align: center; padding: 40px; color: #e74c3c; font-weight: bold;">❌ Không tìm thấy câu hỏi nào liên quan!</div>';
+                }
+            } catch (e) {
+                alert("Lỗi tìm kiếm: " + e.message);
+            } finally {
+                loading.style.display = "none";
+            }
+        }
+
+        function renderSearchResults(items) {
+            const resultsList = document.getElementById("search-results-list");
+            resultsList.innerHTML = "";
+            
+            items.forEach((item, index) => {
+                const card = document.createElement("div");
+                card.className = "search-card";
+                card.onclick = () => openSearchDetail(index);
+                
+                // Hiển thị ảnh nếu có, nếu không hiển thị icon text
+                const isText = item.type === "text";
+                const imgHtml = isText ? 
+                    `<div style="width:100%; height:160px; display:flex; align-items:center; justify-content:center; background:#f8fafc; color:#94a3b8; font-size:40px;">📝</div>` :
+                    `<img src="${item.img}" alt="Q">`;
+
+                card.innerHTML = `
+                    ${imgHtml}
+                    <div class="search-card-info">
+                        <div style="font-weight: bold; color: var(--secondary); margin-bottom: 5px; height: 40px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
+                            ${item.questionText || 'Câu hỏi hình ảnh'}
+                        </div>
+                        <div class="search-card-meta">
+                            <span class="search-tag-sid">${item.source_id || 'N/A'}</span>
+                            <span class="search-tag-ans">${item.ans || '?'}</span>
+                        </div>
+                    </div>
+                `;
+                resultsList.appendChild(card);
+            });
+        }
+
+        function openSearchDetail(idx) {
+            currentSearchIdx = idx;
+            const item = currentSearchItems[idx];
+            if (!item) return;
+
+            const modal = document.getElementById("search-detail-modal");
+            const img = document.getElementById("sdm-img");
+            const textDiv = document.getElementById("sdm-text");
+            const textQ = document.getElementById("sdm-text-q");
+            
+            if (item.type === "text") {
+                img.style.display = "none";
+                textDiv.style.display = "block";
+                
+                let content = `<div style="margin-bottom: 20px;">${(item.highlightedText || item.questionText || "").replace(/\n/g, '<br>')}</div>`;
+                
+                // Nếu có options đã được highlight từ backend
+                if (item.highlightedOptions) {
+                    content += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.8em;">`;
+                    for (const [k, v] of Object.entries(item.highlightedOptions)) {
+                        content += `<div style="padding: 10px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;">
+                            <b style="color: var(--primary);">${k}:</b> ${v}
+                        </div>`;
+                    }
+                    content += `</div>`;
+                } else if (item.optionsData) {
+                    // Fallback nếu không có highlight
+                    content += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.8em;">`;
+                    for (const [k, v] of Object.entries(item.optionsData)) {
+                        content += `<div style="padding: 10px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;">
+                            <b>${k}:</b> ${v}
+                        </div>`;
+                    }
+                    content += `</div>`;
+                }
+                
+                textQ.innerHTML = content;
+            } else {
+                img.style.display = "block";
+                img.src = item.img;
+                textDiv.style.display = "none";
+            }
+            
+            document.getElementById("sdm-sid-label").innerText = "Mã đề: " + (item.source_id || "N/A");
+            document.getElementById("sdm-ans-label").innerText = item.ans || "?";
+            document.getElementById("sdm-counter-label").innerText = `${idx + 1} / ${currentSearchItems.length}`;
+            
+            modal.style.display = "flex";
+
+            // Keyboard navigation listener
+            window.onkeydown = (e) => {
+                if (modal.style.display === "flex") {
+                    if (e.key === "ArrowRight") navigateSearch(1);
+                    if (e.key === "ArrowLeft") navigateSearch(-1);
+                    if (e.key === "Escape") closeSearchDetail();
+                }
+            };
+        }
+
+        function navigateSearch(dir) {
+            let nextIdx = currentSearchIdx + dir;
+            if (nextIdx < 0) nextIdx = currentSearchItems.length - 1;
+            if (nextIdx >= currentSearchItems.length) nextIdx = 0;
+            openSearchDetail(nextIdx);
+        }
+
+        function closeSearchDetail() {
+            document.getElementById("search-detail-modal").style.display = "none";
+            window.onkeydown = null; // Clean up listener
+        }
+
+        function closeSmartSearch() {
+            document.getElementById("search-results-area").style.display = "none";
+            document.getElementById("smart-search-input").value = "";
         }
         
         // Mở ra không gian chiêm nghiệm (View) cho 1 câu
@@ -2239,9 +2634,14 @@
             localStorage.setItem("fu_wrongpool_V1_" + subject, JSON.stringify(pool));
         }
         
-        function shuffle(a) { let c=a.length,r;while(c>0){r=Math.floor(Math.random()*c);c--;[a[c],a[r]]=[a[r],a[c]];}return a;}
-
-        function startQuiz(isRetryMode) {
+        function shuffleArray(array) {
+            for (let i = array.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [array[i], array[j]] = [array[j], array[i]];
+            }
+        }
+        
+        function startQuiz(isRetryMode, mode = 'random') {
             loadStudyState(); // Gọi State ra để đồng bộ tính năng [Lưu Sao - Bookmark]
             
             if (!isRetryMode) {
@@ -2257,44 +2657,67 @@
                 if (!isAllSets) {
                     validPool = validPool.filter(q => {
                         let filename = q.img.substring(q.img.lastIndexOf('/') + 1);
-                        let setName = filename.split('_q')[0];
-                        if (setName.startsWith("NEW_TEST_")) setName = setName.substring(9);
-                        return selectedSets.includes(setName);
+                        let sid = q.source_id || filename.split('_q')[0];
+                        if (sid.startsWith("NEW_TEST_")) sid = sid.substring(9);
+                        return selectedSets.includes(sid);
                     });
                 }
                 
                 let allowedTypes = Array.from(document.querySelectorAll(".exam-type-cb:checked")).map(cb => cb.value);
-                validPool = validPool.filter(q => {
-                    let isTF = (q.type === 'TF');
-                    if (isTF) return allowedTypes.includes('tf');
-                    // not TF
-                    if (q.ans && q.ans.length === 1) return allowedTypes.includes('1');
-                    if (q.ans && q.ans.length > 1) return allowedTypes.includes('2');
-                    return true;
-                });
-                
-                if (validPool.length === 0) return alert("Không tìm thấy câu hỏi nào trong các mã đề bạn vừa tích. Hãy chọn mã đề khác!");
-                
-                quizPool = validPool;
+                let selectedAns = Array.from(document.querySelectorAll(".exam-ans-cb:checked")).map(cb => cb.value);
+
+                const examPipeline = [
+                    (q) => {
+                        let isTF = (q.type === 'TF');
+                        if (isTF) return allowedTypes.includes('tf');
+                        if (q.ans && q.ans.length === 1) return allowedTypes.includes('1');
+                        if (q.ans && q.ans.length > 1) return allowedTypes.includes('2');
+                        return true;
+                    },
+                    (q) => isAnswerMatch(q._normalizedAnswer, selectedAns)
+                ];
+
+                let pool = validPool.filter(q => examPipeline.every(fn => fn(q)));
                 let limitInput = parseInt(document.getElementById("quiz-limit").value) || 50;
-                let maxQ = Math.min(limitInput, quizPool.length);
-                
-                // THUẬT TOÁN LẶP LẠI NGẮT QUÃNG (Spaced Repetition)
-                let sortedPool = [...quizPool].sort((a, b) => {
-                    let errA = spacedRepState[a.img] || 0;
-                    let errB = spacedRepState[b.img] || 0;
-                    return (errB + Math.random() * 0.5) - (errA + Math.random() * 0.5);
-                });
-                
-                let numHard = Math.floor(maxQ * 0.6);
-                let hardQ = sortedPool.slice(0, numHard);
-                let restQ = shuffle(sortedPool.slice(numHard)).slice(0, maxQ - numHard);
-                
-                currentQuestions = shuffle([...hardQ, ...restQ]);
+
+                if (pool.length === 0) return alert("Không tìm thấy câu hỏi nào thỏa mãn bộ lọc!");
+
+                // --- PHÂN TÁCH MỚI/CŨ (HISTORY-AWARE) ---
+                if (mode === 'new') {
+                    const unseen = pool.filter(q => !studyState.viewed.includes(q.img));
+                    if (unseen.length >= limitInput) {
+                        pool = unseen;
+                    } else {
+                        // Nếu không đủ câu mới, lấy toàn bộ câu mới + bù thêm câu cũ
+                        const seen = pool.filter(q => studyState.viewed.includes(q.img));
+                        shuffleArray(seen);
+                        pool = [...unseen, ...seen.slice(0, limitInput - unseen.length)];
+                    }
+                } else if (mode === 'old') {
+                    const seen = pool.filter(q => studyState.viewed.includes(q.img));
+                    if (seen.length === 0) {
+                        alert("Bạn chưa có lịch sử học tập (câu cũ) nào. Hãy chọn 'THI CÂU MỚI' trước!");
+                        return;
+                    }
+                    pool = seen;
+                } else if (mode === 'bookmark') {
+                    const bookmarks = pool.filter(q => studyState.bookmarked.includes(q.img));
+                    if (bookmarks.length === 0) {
+                        alert("Bạn chưa đánh dấu (⭐) câu hỏi nào trong môn học này!");
+                        return;
+                    }
+                    pool = bookmarks;
+                }
+                // ----------------------------------------
+
+                let maxQ = Math.min(limitInput, pool.length);
+                shuffleArray(pool);
+                currentQuestions = pool.slice(0, maxQ);
             } else {
                 let savedWrongs = getPersistedWrongPool();
                 if (savedWrongs.length === 0) return alert("Không có câu hỏi sai nào để luyện tập!");
-                currentQuestions = shuffle([...savedWrongs]);
+                currentQuestions = [...savedWrongs];
+                shuffleArray(currentQuestions);
             }
             
             userStates = currentQuestions.map(() => ({ selected: new Set(), isChecked: false, isCorrect: false, correctAnsChoice: "" }));

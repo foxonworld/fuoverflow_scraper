@@ -18,6 +18,7 @@ from app.services import storage
 from app.services.crawler import broadcast_log
 from app.utils.helpers import get_source_mapping, get_source_score
 from app.services import deploy as deploy_svc
+from app.services import search as search_svc
 
 router = APIRouter()
 
@@ -640,6 +641,19 @@ async def apply_smart(name: str, changes: dict):
     await storage.save_quiz_data(data)
     storage.delete_draft(name, "smart_audit")
     return {"message": f"Applied {updated} changes"}
+
+
+# ─── Smart Search ─────────────────────────────────────────────────────────────
+
+@router.post("/api/search/smart")
+async def api_smart_search(req: dict):
+    subject = req.get("subject")
+    query = req.get("query")
+    if not subject or not query:
+        raise HTTPException(status_code=400, detail="Thiếu subject hoặc query")
+        
+    results = await search_svc.perform_smart_search(subject, query)
+    return {"results": results}
 
 
 @router.get("/api/audit/subjects/{name}/threads")
