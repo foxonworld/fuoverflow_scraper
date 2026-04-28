@@ -9,6 +9,10 @@ from app.services import storage
 from app.core.logger import logger
 from app.core.state import state
 
+# Lưu trữ kết quả deploy gần nhất để API truy vấn
+DEPLOY_RESULTS = {}
+EXPORT_DIR = "data/exports"
+
 async def broadcast_deploy_log(message: str, type: str = "info"):
     """Gửi log qua WebSocket với icon/màu sắc tương ứng."""
     from app.services.crawler import broadcast_log
@@ -85,6 +89,20 @@ def get_subject_package_info(subject: str) -> Dict[str, Any]:
         "file_list": found_statics + ["data.js"] + found_images,
         "integrity": "OK" if not missing_images else "WARNING"
     }
+
+def create_zip_package(source_dir: str, subject: str) -> str:
+    """Nén thư mục build thành file ZIP."""
+    os.makedirs(EXPORT_DIR, exist_ok=True)
+    output_path = os.path.join(EXPORT_DIR, f"{subject}.zip")
+    
+    # Xóa file cũ nếu tồn tại
+    if os.path.exists(output_path):
+        os.remove(output_path)
+        
+    # Nén (shutil.make_archive tự động thêm .zip nếu không có, nên ta bỏ qua đuôi)
+    base_name = os.path.join(EXPORT_DIR, subject)
+    shutil.make_archive(base_name, 'zip', source_dir)
+    return output_path
 
 async def build_and_push_to_github(subject: str, force: bool = False, rename_images: bool = False):
     """
@@ -200,19 +218,34 @@ async def build_and_push_to_github(subject: str, force: bool = False, rename_ima
             
             run_git_cmd(push_args, cwd=temp_dir)
             
+            # --- NEW: CREATE ZIP PACKAGE (Level 2) ---
+            await broadcast_deploy_log("Đang tạo gói nén ZIP để download...")
+            zip_path = create_zip_package(temp_dir, subject)
+            
             # Bonus: Đề xuất URL (Giả định GitHub Pages hoặc Netlify convention)
+            github_url = ""
             try:
                 remote_url = run_git_cmd(["git", "remote", "get-url", "origin"]).stdout.strip()
                 if "github.com" in remote_url:
                     parts = remote_url.split("/")
                     user = parts[-2].split(":")[-1]
                     repo = parts[-1].replace(".git", "")
-                    preview_url = f"https://{user}.github.io/{repo}/"
-                    await broadcast_deploy_log(f"Dự đoán Preview URL: {preview_url} (Nếu dùng GH Pages)", "success")
+                    github_url = f"https://github.com/{user}/{repo}/tree/{branch_name}"
+                    await broadcast_deploy_log(f"GitHub Branch: {github_url}", "success")
             except:
                 pass
-                
+            
+            # Lưu kết quả vào memory
+            DEPLOY_RESULTS[subject] = {
+                "subject": subject,
+                "branch": branch_name,
+                "github_url": github_url,
+                "zip_path": zip_path,
+                "timestamp": asyncio.get_event_loop().time()
+            }
+            
             await broadcast_deploy_log(f"Hoàn tất! Đã cập nhật môn {subject} thành công.", "success")
+            await broadcast_deploy_log(f"🏁 DEPLOY_SUCCESS:{subject}")
 
     except Exception as e:
         await broadcast_deploy_log(f"Lỗi quy trình Deploy: {str(e)}", "error")

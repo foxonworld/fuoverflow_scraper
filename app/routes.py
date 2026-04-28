@@ -683,6 +683,24 @@ async def push_to_github(subject: str, background_tasks: BackgroundTasks, force:
     background_tasks.add_task(deploy_svc.build_and_push_to_github, subject, force, rename_images)
     return {"message": "Deployment process started in background"}
 
+@router.get("/api/deploy/status/{subject}")
+async def get_deploy_status(subject: str):
+    result = deploy_svc.DEPLOY_RESULTS.get(subject)
+    if not result:
+        raise HTTPException(status_code=404, detail="No deployment history for this subject")
+    return result
+
+@router.get("/api/deploy/download/{subject}")
+async def download_deploy_zip(subject: str):
+    result = deploy_svc.DEPLOY_RESULTS.get(subject)
+    if not result or not os.path.exists(result["zip_path"]):
+        raise HTTPException(status_code=404, detail="ZIP file not found. Please deploy first.")
+    return FileResponse(
+        result["zip_path"], 
+        filename=f"{subject}_standalone.zip",
+        media_type="application/zip"
+    )
+
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # WEBSOCKET
