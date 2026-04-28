@@ -1,0 +1,1 @@
+const quizData = {"AuditTest": [{"id": "a1", "ans": {"old_ans": "A", "suggested": "C", "stats": {"A": 2, "C": 5}}, "img": "img/a1.jpg", "is_audited": true}, {"id": "a2", "ans": "B", "img": "img/a2.jpg"}, {"id": "a3", "ans": {"old_ans": "?", "suggested": "D", "stats": {"D": 3}}, "img": "img/a3.jpg", "is_audited": true}]};

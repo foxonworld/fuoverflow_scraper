@@ -53,6 +53,7 @@ class AppConfig(BaseModel):
 
 class AuditRequest(BaseModel):
     urls: List[str]
+    skip_mining: bool = False
 
 
 class StartCrawlerRequest(BaseModel):

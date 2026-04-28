@@ -60,11 +60,20 @@ def load_quiz_data() -> Dict[str, Any]:
                 json_str = content.split("quizData =", 1)[1].strip()
                 if json_str.endswith(";"):
                     json_str = json_str[:-1]
-                return json.loads(json_str)
+                
+                if not json_str:
+                    logger.error("Dữ liệu sau 'quizData =' bị rỗng!")
+                    return {}
+                
+                try:
+                    return json.loads(json_str)
+                except json.JSONDecodeError as je:
+                    logger.error(f"Lỗi parse JSON: {je}. Nội dung bắt đầu bằng: {json_str[:100]}...")
+                    raise je
         except (json.JSONDecodeError, IndexError) as e:
             if attempt == 4:
                 logger.error(f"Không đọc được data.js sau 5 lần: {e}")
-            time.sleep(0.2)  # Sync sleep – đây là sync function nên OK
+            time.sleep(0.5)  # Tăng thời gian chờ một chút
         except Exception as e:
             logger.error(f"Lỗi đọc data.js: {e}")
             break

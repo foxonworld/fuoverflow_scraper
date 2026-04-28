@@ -1,0 +1,48 @@
+"""
+BUG ANALYSIS REPORT: AUDIT ANSWER FEATURE
+==========================================
+
+ROOT CAUSE:
+-----------
+The apply_audit and apply_smart endpoints don't validate the `changes` parameter.
+If the frontend sends full audit objects as values (instead of just answer strings),
+the code tries to assign the entire dictionary as the answer instead of extracting
+the suggested answer string.
+
+AFFECTED ENDPOINTS:
+-------------------
+1. POST /api/audit/subjects/{name}/apply
+2. POST /api/audit/subjects/{name}/smart/apply
+
+CURRENT BEHAVIOR (BUGGY):
+-----------
+When changes = {
+    "q001": {"old_ans": "A", "suggested": "C", "stats": {...}},
+    "q002": {"old_ans": "?", "suggested": "D", "stats": {...}}
+}
+
+The code does:
+    id_map[q_id]["ans"] = new_ans
+    
+Which results in:
+    question.ans = {"old_ans": "A", "suggested": "C", "stats": {...}}  # WRONG!
+
+Instead of:
+    question.ans = "C"  # CORRECT!
+
+IMPACT:
+-------
+- Answers become dictionaries instead of strings
+- Quiz data becomes corrupted
+- AI Clean and other features that expect string answers fail
+- Data validation breaks
+
+SOLUTION:
+---------
+Extract the answer value properly from the changes parameter:
+- If value is a dict, check for "suggested" (audit) or "final_ans" (smart refine)
+- If value is already a string, use it directly
+- Add validation to ensure the result is a valid answer (A, B, C, D, or TF)
+"""
+
+print(__doc__)

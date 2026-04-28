@@ -17,6 +17,7 @@ from app.schema import AppConfig, AuditRequest, BulkDeleteRequest
 from app.services import storage
 from app.services.crawler import broadcast_log
 from app.utils.helpers import get_source_mapping, get_source_score
+from app.services import deploy as deploy_svc
 
 router = APIRouter()
 
@@ -43,6 +44,15 @@ async def read_admin():
 @router.get("/index.html", response_class=HTMLResponse)
 async def read_index():
     with open("index.html", "r", encoding="utf-8") as f:
+        html = f.read()
+    mapping = _get_source_mapping()
+    inject = f"<script>window.globalSourceMapping = {json.dumps(mapping, ensure_ascii=False)};</script>"
+    return HTMLResponse(html.replace("</head>", f"{inject}</head>"))
+
+
+@router.get("/deploy.html", response_class=HTMLResponse)
+async def read_deploy():
+    with open("deploy.html", "r", encoding="utf-8") as f:
         html = f.read()
     mapping = _get_source_mapping()
     inject = f"<script>window.globalSourceMapping = {json.dumps(mapping, ensure_ascii=False)};</script>"
@@ -330,11 +340,38 @@ async def list_drafts():
         return {"drafts": []}
     files = [f for f in os.listdir(D) if f.endswith(".json")]
     result = []
+    # Các loại tool_type hợp lệ
+    valid_types = ["ai_audit", "smart_audit", "audit", "clean", "trash", "classify"]
+    
     for f in files:
-        parts = f.replace(".json", "").rsplit("_", 1)
-        if len(parts) == 2:
-            result.append({"subject": parts[0], "type": parts[1], "file": f, "mtime": os.path.getmtime(os.path.join(D, f))})
+        name_no_ext = f.replace(".json", "")
+        found = False
+        for t in valid_types:
+            if name_no_ext.endswith("_" + t):
+                subject = name_no_ext[:-(len(t)+1)]
+                result.append({
+                    "subject": subject, 
+                    "type": t, 
+                    "file": f, 
+                    "mtime": os.path.getmtime(os.path.join(D, f))
+                })
+                found = True
+                break
+        
+        if not found:
+            # Fallback cho các loại khác
+            parts = name_no_ext.rsplit("_", 1)
+            if len(parts) == 2:
+                result.append({"subject": parts[0], "type": parts[1], "file": f, "mtime": os.path.getmtime(os.path.join(D, f))})
     return {"drafts": result}
+
+
+@router.get("/api/drafts/{subject}/{tool_type}")
+async def get_draft_content(subject: str, tool_type: str):
+    data = storage.load_draft(subject, tool_type)
+    if not data:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return data
 
 
 @router.delete("/api/drafts/{subject}/{tool_type}")
@@ -457,19 +494,69 @@ async def reanalyze(name: str, background_tasks: BackgroundTasks):
     return {"message": "Re-analysis started"}
 
 
-@router.post("/api/ai/clean/{name}/export_v2")
-async def export_v2(name: str):
-    if not state.ai_results:
-        raise HTTPException(status_code=400, detail="Chạy AI scan trước")
+    return {"message": f"Đã tạo {new_name}", "new_subject": new_name, "count": len(clean)}
+
+
+@router.post("/api/ai/clean/{name}/apply")
+async def apply_clean(name: str, changes: dict):
+    """
+    Phê duyệt các thay đổi từ Review Center (Clean draft).
+    changes format: { q_id: { "action": "accept_ai"|"keep_old"|"delete", "aiAns": "...", "questionText": "..." } }
+    Hoặc cho Duplicates: { "ids": [id1, id2], "action": "merge" }
+    """
+    storage.create_named_backup(f"{name}_pre_clean_apply")
     data = storage.load_quiz_data()
     if name not in data:
-        raise HTTPException(status_code=404, detail="Not found")
-    dupe_ids = {str(p[1]) for p in state.ai_results.get("exact", []) + state.ai_results.get("fuzzy", [])}
-    clean = [q for q in data[name] if str(q.get("id")) not in dupe_ids]
-    new_name = f"{name}_v2"
-    data[new_name] = clean
+        raise HTTPException(status_code=404, detail="Subject not found")
+        
+    id_map = {str(q.get("id")): q for q in data[name] if isinstance(q, dict)}
+    updated = 0
+    deleted = 0
+    
+    # 1. Xử lý các thay đổi đơn lẻ (Conflicts / AI Changes)
+    for q_id, decision in changes.items():
+        if q_id == "duplicates" or not isinstance(decision, dict):
+            continue
+            
+        if q_id in id_map:
+            action = decision.get("action")
+            if action == "accept_ai":
+                if decision.get("aiAns"):
+                    id_map[q_id]["ans"] = decision["aiAns"]
+                if decision.get("questionText"):
+                    id_map[q_id]["questionText"] = decision["questionText"]
+                id_map[q_id]["is_audited"] = True
+                updated += 1
+            elif action == "delete":
+                # Đánh dấu để xóa sau
+                id_map[q_id]["_to_delete"] = True
+                deleted += 1
+            elif action == "keep_old":
+                id_map[q_id]["is_audited"] = True
+                updated += 1
+
+    # 2. Xử lý trùng lặp (nếu có gửi kèm)
+    if "duplicates" in changes:
+        for dupe_decision in changes["duplicates"]:
+            keep_id = dupe_decision.get("keep")
+            remove_ids = dupe_decision.get("remove", [])
+            for rid in remove_ids:
+                if rid in id_map:
+                    id_map[rid]["_to_delete"] = True
+                    deleted += 1
+
+    # Thực hiện xóa các item đã đánh dấu
+    if deleted > 0:
+        data[name] = [q for q in data[name] if not q.get("_to_delete")]
+
     await storage.save_quiz_data(data)
-    return {"message": f"Đã tạo {new_name}", "new_subject": new_name, "count": len(clean)}
+    storage.delete_draft(name, "clean")
+    
+    return {
+        "message": f"Đã cập nhật {updated} câu, xóa {deleted} câu trùng lặp.",
+        "updated": updated,
+        "deleted": deleted
+    }
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -481,6 +568,8 @@ async def start_audit(name: str, req: AuditRequest, background_tasks: Background
     if state.is_crawler_running:
         raise HTTPException(status_code=400, detail="Crawler đang chạy")
     state.audit_results = None
+    # Xóa bản nháp cũ để không bị show dữ liệu cũ khi đang chạy scan mới
+    storage.delete_draft(name, "audit")
     background_tasks.add_task(_audit_worker, name, req.urls)
     return {"message": "Audit started"}
 
@@ -500,9 +589,14 @@ async def apply_audit(name: str, changes: dict):
     updated = 0
     for q_id, new_ans in changes.items():
         if q_id in id_map:
-            id_map[q_id]["ans"] = new_ans
-            id_map[q_id]["is_audited"] = True
-            updated += 1
+            # Extract answer value: handle both string and dict (full audit object) formats
+            ans_value = new_ans
+            if isinstance(new_ans, dict):
+                ans_value = new_ans.get("suggested", "?")
+            if isinstance(ans_value, str) and ans_value.strip():
+                id_map[q_id]["ans"] = ans_value.strip()
+                id_map[q_id]["is_audited"] = True
+                updated += 1
     await storage.save_quiz_data(data)
     state.audit_results = None
     storage.delete_draft(name, "audit")
@@ -513,7 +607,10 @@ async def apply_audit(name: str, changes: dict):
 async def start_smart(name: str, req: AuditRequest, background_tasks: BackgroundTasks):
     if state.is_crawler_running:
         raise HTTPException(status_code=400, detail="Crawler đang chạy")
-    background_tasks.add_task(_smart_refine_worker, name, req.urls)
+    # Xóa bản nháp cũ trừ khi yêu cầu skip_mining (vì skip_mining cần dùng lại draft cũ)
+    if not req.skip_mining:
+        storage.delete_draft(name, "smart_audit")
+    background_tasks.add_task(_smart_refine_worker, name, req.urls, req.skip_mining)
     return {"message": "Smart Refine started"}
 
 
@@ -532,9 +629,14 @@ async def apply_smart(name: str, changes: dict):
     updated = 0
     for q_id, ans in changes.items():
         if q_id in id_map:
-            id_map[q_id]["ans"] = ans
-            id_map[q_id]["is_smart_audited"] = True
-            updated += 1
+            # Extract answer value: handle both string and dict (full smart audit object) formats
+            ans_value = ans
+            if isinstance(ans, dict):
+                ans_value = ans.get("final_ans", "?")
+            if isinstance(ans_value, str) and ans_value.strip():
+                id_map[q_id]["ans"] = ans_value.strip()
+                id_map[q_id]["is_smart_audited"] = True
+                updated += 1
     await storage.save_quiz_data(data)
     storage.delete_draft(name, "smart_audit")
     return {"message": f"Applied {updated} changes"}
@@ -543,13 +645,13 @@ async def apply_smart(name: str, changes: dict):
 @router.get("/api/audit/subjects/{name}/threads")
 async def get_threads(name: str):
     data = storage.load_quiz_data()
-    base_name = name.split("_")[0].upper()
-    actual_key = next((k for k in data if k.upper().startswith(base_name)), name)
+    actual_key = name
     if actual_key not in data:
         return []
     cfg = storage.load_config()
     sources = cfg.get("SOURCES", [])
-    cfg_urls = [s["url"] for s in sources if base_name in s.get("subject", "").upper() and s.get("enabled")]
+    cfg_urls = [s["url"] for s in sources if s.get("subject") == name and s.get("enabled")]
+    await broadcast_log(f"🔍 [get_threads] Mapping: {name} -> {actual_key} | Tìm thấy {len(cfg_urls)} sources trong config")
     threads = {}
     for q in data[actual_key]:
         if not isinstance(q, dict):
@@ -561,7 +663,25 @@ async def get_threads(name: str):
             if safe_slug in fn:
                 threads.setdefault(url, {"url": url, "slug": slug, "count": 0})["count"] += 1
                 break
+    await broadcast_log(f"📍 [get_threads] Kết quả: {len(threads)} threads có ảnh trùng khớp.")
     return list(threads.values())
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# DEPLOYMENT ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════
+
+@router.get("/api/deploy/preview/{subject}")
+async def get_deploy_preview(subject: str):
+    info = deploy_svc.get_subject_package_info(subject)
+    if "error" in info:
+        raise HTTPException(status_code=404, detail=info["error"])
+    return info
+
+@router.post("/api/deploy/push/{subject}")
+async def push_to_github(subject: str, background_tasks: BackgroundTasks, force: bool = False, rename_images: bool = False):
+    background_tasks.add_task(deploy_svc.build_and_push_to_github, subject, force, rename_images)
+    return {"message": "Deployment process started in background"}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -589,21 +709,32 @@ async def websocket_logs(websocket: WebSocket):
 # ═══════════════════════════════════════════════════════════════════════════════
 
 async def _trash_filter_worker(subject_name: str):
-    storage.create_named_backup(f"{subject_name}_pre_trash")
     data = storage.load_quiz_data()
     if subject_name not in data:
         return
-    before = len(data[subject_name])
-    clean = [q for q in data[subject_name]
-             if isinstance(q, dict) and q.get("img") and os.path.exists(q["img"])
-             and q.get("ans") and q["ans"] != "?"]
-    removed = before - len(clean)
-    if removed > 0:
-        data[subject_name] = clean
-        await storage.save_quiz_data(data)
-        await broadcast_log(f"🗑️ Trash Filter: Đã xóa {removed} câu rác khỏi {subject_name}")
+    
+    trash_items = []
+    for q in data[subject_name]:
+        if not isinstance(q, dict): continue
+        img_exists = os.path.exists(q.get("img", ""))
+        is_bad = False
+        reason = ""
+        
+        if not q.get("img") or not img_exists:
+            is_bad = True
+            reason = "Missing image"
+        elif not q.get("ans") or q["ans"] == "?":
+            is_bad = True
+            reason = "No answer"
+            
+        if is_bad:
+            trash_items.append({**q, "reason": reason, "type": "trash"})
+            
+    if trash_items:
+        storage.save_draft(subject_name, "trash", trash_items)
+        await broadcast_log(f"🗑️ Trash Filter: Tìm thấy {len(trash_items)} câu rác trong {subject_name}. Vui lòng Review.")
     else:
-        await broadcast_log(f"✅ Trash Filter: {subject_name} đã sạch")
+        await broadcast_log(f"✅ Trash Filter: {subject_name} không có câu rác.")
 
 
 async def _ai_classify_worker(subject_name: str, source_id: str = None):
@@ -613,7 +744,7 @@ async def _ai_classify_worker(subject_name: str, source_id: str = None):
         to_process = [i for i, q in enumerate(questions)
                       if isinstance(q, dict) and (not source_id or q.get("source_id") == source_id)]
         state.ai_progress = {"current": 0, "total": len(to_process), "status": "Classifying..."}
-        batch_size = 5
+        batch_size = 3
         for i in range(0, len(to_process), batch_size):
             chunk = to_process[i:i + batch_size]
             paths = [questions[idx]["img"] for idx in chunk if questions[idx].get("img")]
@@ -624,7 +755,7 @@ async def _ai_classify_worker(subject_name: str, source_id: str = None):
                     questions[chunk[j]]["type"] = res.get("type", "MCQ")
             state.ai_progress["current"] += len(chunk)
             await storage.save_quiz_data(data, backup=False)
-            await asyncio.sleep(0.5)
+            await asyncio.sleep(5)
         state.ai_progress["status"] = "Done"
         await broadcast_log(f"Classification xong: {subject_name}")
     except Exception as e:
@@ -674,12 +805,15 @@ async def _ai_clean_worker(subject_name: str, limit: int = None, mode: str = "sc
         # Phase 2: Local OCR
         if mode in ("scan", "scan_only_ocr"):
             state.ai_progress["status"] = "Phase 1: OCR..."
+            await broadcast_log(f"🔍 Phase 1: Bắt đầu Local OCR cho {total} câu hỏi...")
             try:
                 import easyocr
                 ocr_reader = easyocr.Reader(["vi", "en"], gpu=False)
-            except Exception:
+            except Exception as e:
+                await broadcast_log(f"⚠️ EasyOCR Error: {e}. Sẽ bỏ qua OCR cục bộ.")
                 ocr_reader = None
 
+            ocr_count = 0
             for i, q in enumerate(questions):
                 state.ai_progress["current"] = i
                 if not q.get("questionText") and os.path.exists(q.get("img", "")):
@@ -688,36 +822,106 @@ async def _ai_clean_worker(subject_name: str, limit: int = None, mode: str = "sc
                         try:
                             results = await loop.run_in_executor(None, ocr_reader.readtext, q["img"], 0)
                             q["questionText"] = " ".join(results)
+                            ocr_count += 1
                         except Exception:
                             pass
-                if i % 20 == 0:
+                if i % 50 == 0 and i > 0:
                     await storage.save_quiz_data(data, backup=False)
+                    await broadcast_log(f"... Đã xử lý OCR {i}/{total} câu.")
+
+            await broadcast_log(f"✅ OCR Cục bộ hoàn tất. Đã nhận diện thêm {ocr_count} câu.")
 
         if mode == "scan_only_ocr":
-            await broadcast_log(f"✅ OCR xong cho {subject_name}")
             return
-
-        # Phase 3: AI text refinement
+            
+        # Phase 3: AI text refinement -> Save to DRAFT
         state.ai_progress["status"] = "Phase 2: AI Refinement..."
         cfg = storage.load_config()
-        batch_size = 20 if cfg.get("AI_PROVIDER") == "gemini" else 5
-        pending = [i for i, q in enumerate(questions) if not q.get("aiAns") and q.get("questionText")]
+        
+        # Intelligent provider selection: Use Groq if available (better for text)
+        groq_key = cfg.get("GROQ_API_KEY", "").strip()
+        gemini_key = cfg.get("GEMINI_API_KEY", "").strip()
+        use_provider = "groq" if groq_key else "gemini"
+        
+        # Batch sizes: 8 is a safe number to stay under Groq's 6000 TPM limit
+        batch_size = 8
+        
+        # We only refine items that don't have aiAns OR we are in reanalyze mode
+        pending = [i for i, q in enumerate(questions) if q.get("questionText")]
+        if mode != "reanalyze":
+            pending = [i for i in pending if not questions[i].get("aiAns")]
+            
+        await broadcast_log(f"🤖 Phase 2: AI Refinement - Tổng {len(pending)} câu (Batch size: {batch_size})")
+        await broadcast_log(f"⚙️ Provider ưu tiên: {use_provider.upper()}")
+        
+        ai_suggestions = []
+        consecutive_failures = 0
+        
         for i in range(0, len(pending), batch_size):
-            chunk = pending[i:i + batch_size]
-            texts = [questions[idx].get("questionText", "") for idx in chunk]
-            prompt = "Fix OCR errors, remove UI noise. Return JSON: [{\"questionText\": \"text\", \"aiAns\": \"ans\"}]. Data: " + json.dumps(texts)
-            results = await ai_svc.extract_text_from_images([], prompt)
+            state.ai_progress["current"] = total - len(pending) + i
+            state.ai_progress["status"] = f"Phase 2: AI Refinement ({i}/{len(pending)})"
+            chunk_indices = pending[i:i + batch_size]
+            texts = [questions[idx].get("questionText", "") for idx in chunk_indices]
+            
+            prompt = "Fix OCR errors, remove UI noise. Return JSON only, no markdown. Format: [{\"questionText\": \"text\", \"aiAns\": \"A/B/C/D\"}]. Data: " + json.dumps(texts)
+            results = await ai_svc.ask_text_only(prompt)
+            
+            if not results:
+                consecutive_failures += 1
+                await broadcast_log(f"❌ Batch {i//batch_size + 1} thất bại. Thất bại liên tiếp: {consecutive_failures}")
+                if consecutive_failures >= 5:
+                    await broadcast_log(f"🛑 DỪNG: Quá nhiều lỗi API. Vui lòng:")
+                    await broadcast_log(f"  1. Nâng cấp API tier (Gemini, Groq) để tăng quota")
+                    await broadcast_log(f"  2. Chờ quota reset (thường 1 giờ)")
+                    await broadcast_log(f"  3. Sử dụng Review Center để sửa thủ công")
+                    break
+                # Exponential backoff on failures
+                wait_seconds = 30 + (consecutive_failures * 15)
+                await broadcast_log(f"⏳ Đợi {wait_seconds}s trước retry...")
+                await asyncio.sleep(wait_seconds)
+                continue
+            
+            consecutive_failures = 0  # Reset on success
+
             for j, res in enumerate(results):
-                if j < len(chunk):
-                    questions[chunk[j]]["questionText"] = res.get("questionText", "")
-                    questions[chunk[j]]["aiAns"] = res.get("aiAns", "")
-            await storage.save_quiz_data(data, backup=False)
-            await asyncio.sleep(1)
+                if j < len(chunk_indices):
+                    idx = chunk_indices[j]
+                    orig_q = questions[idx]
+                    
+                    # Create a suggestion item for the Review Center
+                    suggestion = {
+                        "id": orig_q.get("id"),
+                        "img": orig_q.get("img"),
+                        "old_text": orig_q.get("questionText"),
+                        "questionText": res.get("questionText", ""),
+                        "aiAns": res.get("aiAns", ""),
+                        "type": "change"
+                    }
+                    ai_suggestions.append(suggestion)
+            
+            await broadcast_log(f"--- Đã tinh chỉnh {min(i + batch_size, len(pending))}/{len(pending)} câu ({use_provider.upper()}).")
+            
+            if i + batch_size < len(pending):
+                # VERY conservative delay: Groq TPM + Gemini RPM
+                if use_provider == "groq":
+                    wait_seconds = 25  # ~240 tokens/sec at 6000 TPM, 1 Q ≈ 100 tokens → 25s safe
+                else:
+                    wait_seconds = 30  # Gemini: 15 RPM = 1 request/4s, be VERY safe with 30s
+                await broadcast_log(f"⏳ Đợi {wait_seconds}s...")
+                await asyncio.sleep(wait_seconds)
+
+
+        if ai_suggestions:
+            storage.save_draft(subject_name, "clean", ai_suggestions)
+            await broadcast_log(f"📦 Đã lưu {len(ai_suggestions)} gợi ý vào Review Center. Vui lòng phê duyệt.")
+        else:
+            await broadcast_log(f"ℹ️ Không có gợi ý mới từ AI cho {subject_name}.")
 
         if mode == "reanalyze":
-            pass  # Skip fuzzy if reanalyzing from existing data
+            return
 
         # Phase 4: Fuzzy duplicate check
+        await broadcast_log(f"🧠 Phase 3: Đang tìm kiếm câu hỏi trùng lặp (Fuzzy Similarity > 85%)...")
         def _norm(text):
             if not text:
                 return ""
@@ -742,11 +946,28 @@ async def _ai_clean_worker(subject_name: str, limit: int = None, mode: str = "sc
                 if t2 and SequenceMatcher(None, t1, t2).ratio() > 0.85:
                     fuzzy_dupes.append((questions[i].get("id"), questions[j].get("id")))
 
-        state.ai_results = {"exact": exact_dupes, "fuzzy": fuzzy_dupes, "total_scanned": total}
-        storage.save_draft(subject_name, "clean", state.ai_results)
+        # --- CONSOLIDATE ALL RESULTS INTO ONE DRAFT ---
+        all_results = []
+        # 1. AI Text/Ans changes
+        for sug in ai_suggestions:
+            all_results.append({**sug, "type": "change"})
+            
+        # 2. Exact Dupes
+        for d1, d2 in exact_dupes:
+            all_results.append({"ids": [d1, d2], "type": "dupe", "subtype": "exact"})
+            
+        # 3. Fuzzy Dupes
+        for d1, d2 in fuzzy_dupes:
+            all_results.append({"ids": [d1, d2], "type": "dupe", "subtype": "fuzzy"})
+
+        if all_results:
+            storage.save_draft(subject_name, "clean", all_results)
+            await broadcast_log(f"✨ AI Clean Hoàn tất: {len(ai_suggestions)} thay đổi, {len(exact_dupes) + len(fuzzy_dupes)} trùng lặp.")
+            await broadcast_log(f"📦 Vui lòng mở Review Center để duyệt kết quả.")
+        else:
+            await broadcast_log(f"✅ AI Clean: Không tìm thấy vấn đề nào cần xử lý.")
+
         state.ai_progress["status"] = "Done"
-        await storage.save_quiz_data(data)
-        await broadcast_log(f"✨ AI Clean xong! {len(exact_dupes) + len(fuzzy_dupes)} dupes tìm thấy.")
     except Exception as e:
         await broadcast_log(f"❌ AI Clean Error: {e}")
         state.ai_progress["status"] = "Error"
@@ -761,9 +982,9 @@ async def _audit_worker(subject_name: str, urls: list):
 
         await broadcast_log(f"🚀 Audit: {subject_name} ({len(urls)} threads)")
         data = storage.load_quiz_data()
-        actual_key = subject_name if subject_name in data else next(
-            (k for k in data if k.upper().startswith(subject_name.split("_")[0].upper())), subject_name)
+        actual_key = subject_name
         questions = data.get(actual_key, [])
+        await broadcast_log(f"📋 [Audit] Subject: {subject_name} | Key: {actual_key} | Total items: {len(questions)}")
 
         loop = asyncio.get_running_loop()
         driver = await loop.run_in_executor(None, create_driver)
@@ -825,6 +1046,7 @@ async def _audit_worker(subject_name: str, urls: list):
                         "old_ans": target_q.get("ans", "?"),
                         "img": target_q.get("img", ""),
                     }
+                    await broadcast_log(f"🗳️ Vote Q-{q_id}: {dict(counts)} -> {common[0][0]}")
 
         await loop.run_in_executor(None, driver.quit)
 
@@ -842,25 +1064,25 @@ async def _audit_worker(subject_name: str, urls: list):
         await broadcast_log(f"❌ Audit error: {e}")
 
 
-async def _smart_refine_worker(subject_name: str, urls: list):
+async def _smart_refine_worker(subject_name: str, urls: list, skip_mining: bool = False):
     try:
         await broadcast_log(f"🪄 Smart Refine: {subject_name}")
         if not urls:
             cfg = storage.load_config()
             sources = cfg.get("SOURCES", [])
-            base = subject_name.split("_")[0].upper()
-            urls = [s["url"] for s in sources if base in s.get("subject", "").upper() and s.get("enabled")]
+            urls = [s["url"] for s in sources if s.get("subject") == subject_name and s.get("enabled")]
 
         # Phase 1: Comment mining (reuse audit logic)
-        await _audit_worker(subject_name, urls)
+        if not skip_mining:
+            await _audit_worker(subject_name, urls)
+        else:
+            await broadcast_log(f"⏭️ Skipping Phase 1: Dùng dữ liệu audit có sẵn cho {subject_name}")
         all_votes_raw = storage.load_draft(subject_name, "audit") or []
         vote_map = {item["id"]: item for item in all_votes_raw}
 
         # Phase 2: Filter suspicious
         data = storage.load_quiz_data()
-        base = subject_name.split("_")[0].upper()
-        actual_key = subject_name if subject_name in data else next(
-            (k for k in data if k.upper().startswith(base)), subject_name)
+        actual_key = subject_name
         questions = data.get(actual_key, [])
         suspicious = []
         for q in questions:
@@ -884,7 +1106,7 @@ async def _smart_refine_worker(subject_name: str, urls: list):
                     "questionText": q.get("questionText", ""),
                     "current_ans": q.get("ans", ""),
                     "comment_ans": vote_info["suggested"] if vote_info else "N/A",
-                    "comment_votes": vote_info["votes"] if vote_info else {},
+                    "comment_votes": vote_info["stats"] if vote_info else {},
                     "reason": reason,
                 })
 
@@ -896,7 +1118,7 @@ async def _smart_refine_worker(subject_name: str, urls: list):
         # Phase 3: AI verification (text batch)
         await broadcast_log(f"🧠 AI thẩm định {len(suspicious)} câu nghi vấn...")
         final_results = []
-        batch_size = 30
+        batch_size = 8
         for i in range(0, len(suspicious), batch_size):
             batch = suspicious[i:i + batch_size]
             batch_ctx = [{"id": b["id"], "question": b["questionText"][:500],
@@ -922,3 +1144,121 @@ async def _smart_refine_worker(subject_name: str, urls: list):
         await broadcast_log(f"🎉 Smart Refine xong! {len(final_results)} câu đã thẩm định.")
     except Exception as e:
         await broadcast_log(f"❌ Smart Refine error: {e}")
+
+@router.post("/api/ai-audit/{subject}")
+async def start_ai_only_audit(subject: str, background_tasks: BackgroundTasks):
+    """API bắt đầu AI-only Audit cho toàn bộ môn học"""
+    background_tasks.add_task(_ai_batch_audit_worker, subject)
+    return {"ok": True, "message": f"Đã bắt đầu AI Audit cho {subject}"}
+
+
+@router.get("/api/ai-audit/{subject}/results")
+async def get_ai_audit_results(subject: str):
+    """Lấy kết quả AI Audit từ file nháp"""
+    results = storage.load_draft(subject, "ai_audit")
+    return results
+
+
+async def _ai_batch_audit_worker(subject_name: str):
+    """
+    Worker xử lý Audit toàn bộ môn học bằng AI (Batch + Rate Limit)
+    """
+    try:
+        await broadcast_log(f"🚀 Bắt đầu AI-only Audit: {subject_name}")
+        
+        # 1. Load dữ liệu
+        data = storage.load_quiz_data()
+        questions = data.get(subject_name, [])
+        if not questions:
+            await broadcast_log(f"❌ Không tìm thấy dữ liệu cho môn {subject_name}")
+            return
+
+        total = len(questions)
+        await broadcast_log(f"📋 Tìm thấy {total} câu hỏi. Đang chia batch...")
+
+        # 2. Chia batch (Tối ưu lên 30 câu / batch để nhanh hơn gấp 3 lần)
+        batch_size = 30
+        final_results = []
+        
+        import re
+        ans_regex = re.compile(r"Q(\d+):\s*([ABCD])", re.IGNORECASE)
+
+        for i in range(0, total, batch_size):
+            batch = questions[i:i + batch_size]
+            current_batch_idx = (i // batch_size) + 1
+            total_batches = (total + batch_size - 1) // batch_size
+            
+            await broadcast_log(f"🧠 Đang xử lý Batch {current_batch_idx}/{total_batches} ({len(batch)} câu)...")
+
+            # Tạo Prompt
+            prompt_lines = [
+                "Bạn là AI giải trắc nghiệm chuyên nghiệp.",
+                "Hãy đọc các câu hỏi sau và trả lời đáp án ĐÚNG nhất (A, B, C, hoặc D).",
+                "YÊU CẦU: Trả lời đúng format 'Q[ID]: [ANSWER]'. Ví dụ: Q1: A",
+                "KHÔNG giải thích, KHÔNG thêm văn bản thừa.",
+                "---"
+            ]
+            
+            for q in batch:
+                q_id = q.get("id", "0")
+                q_text = q.get("questionText", "")
+                # Thêm Options nếu có
+                options_str = ""
+                if "options" in q and isinstance(q["options"], list):
+                    options_str = "\n".join(q["options"])
+                
+                prompt_lines.append(f"Q{q_id}: {q_text}\n{options_str}")
+
+            prompt = "\n\n".join(prompt_lines)
+
+            # 3. Gửi AI với Retry
+            ai_raw = ""
+            for retry in range(2):
+                try:
+                    # Sử dụng hàm ask_raw_text mới để lấy nội dung thô
+                    ai_raw = await ai_svc.ask_raw_text(prompt)
+                    if ai_raw:
+                        break
+                except Exception as e:
+                    await broadcast_log(f"⚠️ Batch {current_batch_idx} fail (lần {retry+1}): {e}")
+                    await asyncio.sleep(2)
+
+            # 4. Parse kết quả bằng Regex
+            ai_answers = {}
+            if ai_raw:
+                # regex: Q(\d+): ([ABCD])
+                matches = ans_regex.findall(ai_raw)
+                for qid_str, ans in matches:
+                    ai_answers[str(qid_str)] = ans.upper()
+
+            # 5. So sánh và lưu
+            for q in batch:
+                qid = str(q.get("id"))
+                current_ans = str(q.get("ans", "")).strip().upper()
+                ai_ans = ai_answers.get(qid, "N/A")
+                
+                status = "ok" if current_ans == ai_ans else "conflict"
+                if ai_ans == "N/A": 
+                    status = "error"
+                
+                final_results.append({
+                    "id": qid,
+                    "questionText": q.get("questionText", ""),
+                    "current_ans": current_ans,
+                    "ai_ans": ai_ans,
+                    "status": status
+                })
+
+            # 6. Progress & Rate Limit (5s)
+            progress = int((len(final_results) / total) * 100)
+            await broadcast_log(f"📊 {subject_name}: {progress}% ({len(final_results)}/{total}) - Batch {current_batch_idx} OK")
+            
+            storage.save_draft(subject_name, "ai_audit", final_results)
+            await asyncio.sleep(5)
+
+        await broadcast_log(f"✅ Đã hoàn thành AI-only Audit cho {subject_name}! Tổng: {len(final_results)} câu.")
+        
+    except Exception as e:
+        import traceback
+        await broadcast_log(f"❌ Critical AI Audit Error: {str(e)}")
+        print(traceback.format_exc())

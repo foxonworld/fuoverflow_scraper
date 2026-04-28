@@ -893,12 +893,11 @@ async def ask_gemini_text_only(prompt: str, api_key: str):
     """Gửi yêu cầu văn bản thuần túy cho Gemini (Tiết kiệm Token & tránh 503)"""
     if not api_key: return []
     
-    model_id = "gemini-1.5-flash" # Dùng Flash cho tốc độ text cực nhanh
+    model_id = "gemini-2.0-flash" # Model mạnh và ổn định nhất hiện tại
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_id}:generateContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     payload = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"response_mime_type": "application/json"}
+        "contents": [{"parts": [{"text": prompt}]}]
     }
     
     import time
