@@ -1,1 +1,0 @@
-const quizData = {"Concurrent3": [{"id": "3", "ans": "A"}], "Concurrent2": [{"id": "2", "ans": "A"}]};
