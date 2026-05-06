@@ -1,1 +1,0 @@
-const quizData = {"TestSubject": [{"id": "1", "ans": "A"}]};
