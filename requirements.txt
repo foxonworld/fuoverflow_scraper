@@ -11,3 +11,4 @@ webdriver-manager
 Pillow
 aiofiles
 python-multipart
+cloakbrowser==0.5.2

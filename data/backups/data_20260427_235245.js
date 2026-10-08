@@ -1,1 +1,0 @@
-const quizData = {"FixTest": [{"id": "f1", "ans": "C", "img": "img/f1.jpg", "is_smart_audited": true}, {"id": "f2", "ans": "B", "img": "img/f2.jpg", "is_smart_audited": true}]};

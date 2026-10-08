@@ -1872,6 +1872,39 @@
             return normalized;
         }
 
+        function setTextWithLineBreaks(element, value) {
+            if (!element) return;
+            element.textContent = String(value ?? "");
+        }
+
+        function appendSafeHighlightedText(element, value) {
+            if (!element) return;
+            element.replaceChildren();
+            const source = String(value ?? "");
+            const markPattern = /<mark>([\s\S]*?)<\/mark>/gi;
+            let cursor = 0;
+            let match;
+            while ((match = markPattern.exec(source)) !== null) {
+                if (match.index > cursor) {
+                    element.appendChild(document.createTextNode(source.slice(cursor, match.index)));
+                }
+                const mark = document.createElement("mark");
+                mark.textContent = match[1];
+                element.appendChild(mark);
+                cursor = markPattern.lastIndex;
+            }
+            if (cursor < source.length) {
+                element.appendChild(document.createTextNode(source.slice(cursor)));
+            }
+        }
+
+        function setOptionText(element, key, value) {
+            element.replaceChildren();
+            const strong = document.createElement("strong");
+            strong.textContent = "(" + String(key) + ")";
+            element.append(strong, document.createTextNode(" " + String(value ?? "")));
+        }
+
         // ==========================================
         // KHỞI TẠO CẤU TRÚC GLOBAL
         // ==========================================
@@ -1898,8 +1931,8 @@
                     let opt = document.createElement("option"); opt.value = "ALL"; opt.text = `Đề thi tổng hợp (${quizData.length} câu hỏi)`;
                     selectEl.appendChild(opt);
                 } else if (typeof quizData === 'object') {
-                    // Inject Quizlet SWD392v2 data if exists
-                    if (typeof quizletData !== 'undefined') {
+                    // Inject legacy Quizlet data only when it is a real question list.
+                    if (typeof quizletData !== 'undefined' && Array.isArray(quizletData) && quizletData.length > 0) {
                         quizData["SWD392v2"] = quizletData;
                     }
                     
@@ -1959,12 +1992,31 @@
             });
             let sortedSets = Array.from(sets).sort((a, b) => getSourceScore(b) - getSourceScore(a));
             
-            let html = `<label style="display: block; margin-bottom: 8px; font-weight: bold; padding-bottom: 8px; border-bottom: 1px solid #e2e8f0; cursor: pointer;"><input type="checkbox" id="check-all-sets" checked onchange="toggleAllSets(this)" style="transform: scale(1.2); margin-right: 8px;"> 🎲 [TRỘN CÂU HỎI TOÀN KHO]</label>`;
+            boxArea.replaceChildren();
+            const allLabel = document.createElement("label");
+            allLabel.style.cssText = "display:block; margin-bottom:8px; font-weight:bold; padding-bottom:8px; border-bottom:1px solid #e2e8f0; cursor:pointer;";
+            const allCheckbox = document.createElement("input");
+            allCheckbox.type = "checkbox";
+            allCheckbox.id = "check-all-sets";
+            allCheckbox.checked = true;
+            allCheckbox.style.cssText = "transform:scale(1.2); margin-right:8px;";
+            allCheckbox.addEventListener("change", () => toggleAllSets(allCheckbox));
+            allLabel.append(allCheckbox, document.createTextNode(" 🎲 [TRỘN CÂU HỎI TOÀN KHO]"));
+            boxArea.appendChild(allLabel);
             sortedSets.forEach(s => {
-                let displayName = globalSourceMapping[s] || s;
-                html += `<label style="display: block; margin-bottom: 6px; margin-left: 10px; cursor: pointer; color: #475569;"><input type="checkbox" class="set-checkbox" value="${s}" checked onchange="checkIndividualSet()" style="transform: scale(1.1); margin-right: 8px;"> Đề gốc: ${displayName}</label>`;
+                const displayName = globalSourceMapping[s] || s;
+                const label = document.createElement("label");
+                label.style.cssText = "display:block; margin-bottom:6px; margin-left:10px; cursor:pointer; color:#475569;";
+                const checkbox = document.createElement("input");
+                checkbox.type = "checkbox";
+                checkbox.className = "set-checkbox";
+                checkbox.value = String(s);
+                checkbox.checked = true;
+                checkbox.style.cssText = "transform:scale(1.1); margin-right:8px;";
+                checkbox.addEventListener("change", checkIndividualSet);
+                label.append(checkbox, document.createTextNode(" Đề gốc: " + String(displayName)));
+                boxArea.appendChild(label);
             });
-            boxArea.innerHTML = html;
             
             // XỬ LÝ LƯU TRỮ LỊCH SỬ & THUẬT TOÁN (Gắn vào Subject Change)
             loadSpacedRep();
@@ -2293,14 +2345,22 @@
             
             // Fix Option Của Danh Sản Các "Sets" (Từng Bộ Đề)
             let valDropdown = document.getElementById("filter-value");
-            valDropdown.innerHTML = "";
+            valDropdown.replaceChildren();
             let sortedSets = Array.from(sets).sort((a, b) => getSourceScore(b) - getSourceScore(a));
-            sortedSets.forEach(s => { 
-                let displayName = globalSourceMapping[s] || s;
-                valDropdown.innerHTML += `<option value="set_${s}">[ĐỀ GỐC]: ${displayName}</option>`; 
+            sortedSets.forEach(s => {
+                const displayName = globalSourceMapping[s] || s;
+                const option = document.createElement("option");
+                option.value = "set_" + String(s);
+                option.textContent = "[ĐỀ GỐC]: " + String(displayName);
+                valDropdown.appendChild(option);
             });
             
-            [1, 2, 3, 4].forEach(n => { valDropdown.innerHTML += `<option value="ans_${n}">[LOẠI FORMAT]: Có ${n} Lựa Chọn Đúng</option>`; });
+            [1, 2, 3, 4].forEach(n => {
+                const option = document.createElement("option");
+                option.value = "ans_" + n;
+                option.textContent = `[LOẠI FORMAT]: Có ${n} Lựa Chọn Đúng`;
+                valDropdown.appendChild(option);
+            });
             
             document.getElementById("filter-type").value = "all";
             document.querySelectorAll('.screen').forEach(s => s.style.display = 'none');
@@ -2359,25 +2419,29 @@
 
         function renderStudyGrid() {
             let gridEl = document.getElementById("study-grid");
-            gridEl.innerHTML = "";
+            gridEl.replaceChildren();
             
             if (filteredStudyQuestions.length === 0) {
-                gridEl.innerHTML = `<h3 style="grid-column: 1/-1; text-align: center; color:#e74c3c;">Vùng này chưa có câu hỏi nào!</h3>`;
+                const empty = document.createElement("h3");
+                empty.style.cssText = "grid-column:1/-1; text-align:center; color:#e74c3c;";
+                empty.textContent = "Vùng này chưa có câu hỏi nào!";
+                gridEl.appendChild(empty);
                 return;
             }
             
-            let htmlStr = "";
             filteredStudyQuestions.forEach((q, iterIndex) => {
                 let cStr = "q-box";
                 if (studyState.last_viewed === q.img) cStr += " last-viewed";
                 else if (studyState.viewed.includes(q.img)) cStr += " viewed";
                 if (studyState.bookmarked.includes(q.img)) cStr += " bookmarked";
                 
-                // HIỂN THỊ SỐ THỨ TỰ MỚI (ĐÃ ĐƯỢC RE-INDEX THEO THỜI GIAN)
-                htmlStr += `<div class="${cStr}" title="Bộ đề: ${q.setName}" onclick="openStudyViewer(${iterIndex})">${q.displayIndex}</div>`;
+                const box = document.createElement("div");
+                box.className = cStr;
+                box.title = "Bộ đề: " + String(q.setName || "");
+                box.textContent = String(q.displayIndex ?? "");
+                box.addEventListener("click", () => openStudyViewer(iterIndex));
+                gridEl.appendChild(box);
             });
-            
-            gridEl.innerHTML = htmlStr;
             let tv = studyState.viewed.length;
             let tb = studyState.bookmarked.length;
             let tt = globalStudyQuestions.length;
@@ -2433,31 +2497,41 @@
 
         function renderSearchResults(items) {
             const resultsList = document.getElementById("search-results-list");
-            resultsList.innerHTML = "";
+            resultsList.replaceChildren();
             
             items.forEach((item, index) => {
                 const card = document.createElement("div");
                 card.className = "search-card";
-                card.onclick = () => openSearchDetail(index);
+                card.addEventListener("click", () => openSearchDetail(index));
                 
-                // Hiển thị ảnh nếu có, nếu không hiển thị icon text
-                const isText = item.type === "text";
-                const imgHtml = isText ? 
-                    `<div style="width:100%; height:160px; display:flex; align-items:center; justify-content:center; background:#f8fafc; color:#94a3b8; font-size:40px;">📝</div>` :
-                    `<img src="${item.img}" alt="Q">`;
+                if (item.type === "text") {
+                    const placeholder = document.createElement("div");
+                    placeholder.style.cssText = "width:100%; height:160px; display:flex; align-items:center; justify-content:center; background:#f8fafc; color:#94a3b8; font-size:40px;";
+                    placeholder.textContent = "📝";
+                    card.appendChild(placeholder);
+                } else {
+                    const image = document.createElement("img");
+                    image.src = String(item.img || "");
+                    image.alt = "Q";
+                    card.appendChild(image);
+                }
 
-                card.innerHTML = `
-                    ${imgHtml}
-                    <div class="search-card-info">
-                        <div style="font-weight: bold; color: var(--secondary); margin-bottom: 5px; height: 40px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">
-                            ${item.questionText || 'Câu hỏi hình ảnh'}
-                        </div>
-                        <div class="search-card-meta">
-                            <span class="search-tag-sid">${item.source_id || 'N/A'}</span>
-                            <span class="search-tag-ans">${item.ans || '?'}</span>
-                        </div>
-                    </div>
-                `;
+                const info = document.createElement("div");
+                info.className = "search-card-info";
+                const title = document.createElement("div");
+                title.style.cssText = "font-weight:bold; color:var(--secondary); margin-bottom:5px; height:40px; overflow:hidden; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical;";
+                title.textContent = String(item.questionText || "Câu hỏi hình ảnh");
+                const meta = document.createElement("div");
+                meta.className = "search-card-meta";
+                const sourceTag = document.createElement("span");
+                sourceTag.className = "search-tag-sid";
+                sourceTag.textContent = String(item.source_id || "N/A");
+                const answerTag = document.createElement("span");
+                answerTag.className = "search-tag-ans";
+                answerTag.textContent = String(item.ans || "?");
+                meta.append(sourceTag, answerTag);
+                info.append(title, meta);
+                card.appendChild(info);
                 resultsList.appendChild(card);
             });
         }
@@ -2475,30 +2549,31 @@
             if (item.type === "text") {
                 img.style.display = "none";
                 textDiv.style.display = "block";
+                textQ.replaceChildren();
                 
-                let content = `<div style="margin-bottom: 20px;">${(item.highlightedText || item.questionText || "").replace(/\n/g, '<br>')}</div>`;
+                const question = document.createElement("div");
+                question.style.cssText = "margin-bottom:20px; white-space:pre-wrap;";
+                appendSafeHighlightedText(question, item.highlightedText || item.questionText || "");
+                textQ.appendChild(question);
                 
-                // Nếu có options đã được highlight từ backend
-                if (item.highlightedOptions) {
-                    content += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.8em;">`;
-                    for (const [k, v] of Object.entries(item.highlightedOptions)) {
-                        content += `<div style="padding: 10px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;">
-                            <b style="color: var(--primary);">${k}:</b> ${v}
-                        </div>`;
+                const options = item.highlightedOptions || item.optionsData;
+                if (options && typeof options === "object") {
+                    const grid = document.createElement("div");
+                    grid.style.cssText = "display:grid; grid-template-columns:1fr 1fr; gap:10px; font-size:0.8em;";
+                    for (const [k, v] of Object.entries(options)) {
+                        const option = document.createElement("div");
+                        option.style.cssText = "padding:10px; background:#f8fafc; border:1px solid var(--border); border-radius:8px;";
+                        const key = document.createElement("b");
+                        key.style.color = "var(--primary)";
+                        key.textContent = String(k) + ":";
+                        option.append(key, document.createTextNode(" "));
+                        appendSafeHighlightedText(option, v);
+                        option.insertBefore(key, option.firstChild);
+                        option.insertBefore(document.createTextNode(" "), key.nextSibling);
+                        grid.appendChild(option);
                     }
-                    content += `</div>`;
-                } else if (item.optionsData) {
-                    // Fallback nếu không có highlight
-                    content += `<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px; font-size: 0.8em;">`;
-                    for (const [k, v] of Object.entries(item.optionsData)) {
-                        content += `<div style="padding: 10px; background: #f8fafc; border: 1px solid var(--border); border-radius: 8px;">
-                            <b>${k}:</b> ${v}
-                        </div>`;
-                    }
-                    content += `</div>`;
+                    textQ.appendChild(grid);
                 }
-                
-                textQ.innerHTML = content;
             } else {
                 img.style.display = "block";
                 img.src = item.img;
@@ -2554,7 +2629,7 @@
                 textArea.style.display = "flex";
                 textArea.classList.add("large-mode");
                 // User: "không cần hiện đáp án ra trên đề" -> Show q.question (full text with options)
-                document.getElementById("s-text-q").innerHTML = q.question.replace(/\n/g, '<br>');
+                setTextWithLineBreaks(document.getElementById("s-text-q"), q.question);
                 document.getElementById("s-text-options").style.display = "none";
             } else {
                 imgEl.style.display = "block";
@@ -2794,7 +2869,7 @@
                 textArea.style.display = "flex";
                 document.getElementById("q-text-q").innerText = q.questionText;
                 let optList = document.getElementById("q-text-options");
-                optList.innerHTML = "";
+                optList.replaceChildren();
                 Object.keys(q.optionsData).forEach(key => {
                     let item = document.createElement("div");
                     item.className = "text-option-item";
@@ -2804,7 +2879,7 @@
                         else if (state.selected.has(key)) item.classList.add("wrong");
                     }
                     item.onclick = () => toggleOption(key);
-                    item.innerHTML = `<strong>(${key})</strong> ${q.optionsData[key]}`;
+                    setOptionText(item, key, q.optionsData[key]);
                     optList.appendChild(item);
                 });
             } else {
@@ -3024,7 +3099,7 @@
                     
                     // Force update content
                     let contentEl = document.getElementById("fs-text-q");
-                    contentEl.innerHTML = q.question.replace(/\n/g, '<br>');
+                    setTextWithLineBreaks(contentEl, q.question);
                     document.getElementById("fs-text-options").style.display = "none";
                 } else {
                     fsImg.style.setProperty("display", "block", "important");
@@ -3043,10 +3118,10 @@
                     fsImg.style.setProperty("display", "none", "important");
                     fsImg.src = "";
                     fsTextArea.style.setProperty("display", "flex", "important");
-                    document.getElementById("fs-text-q").innerHTML = q.questionText.replace(/\n/g, '<br>');
+                    setTextWithLineBreaks(document.getElementById("fs-text-q"), q.questionText);
                     let optList = document.getElementById("fs-text-options");
                     optList.style.display = "flex";
-                    optList.innerHTML = "";
+                    optList.replaceChildren();
                     Object.keys(q.optionsData).forEach(key => {
                         let item = document.createElement("div");
                         item.className = "text-option-item";
@@ -3056,7 +3131,7 @@
                             else if (state.selected.has(key)) item.classList.add("wrong");
                         }
                         item.onclick = () => toggleFsOption(key);
-                        item.innerHTML = `<strong>(${key})</strong> ${q.optionsData[key]}`;
+                        setOptionText(item, key, q.optionsData[key]);
                         optList.appendChild(item);
                     });
                 } else {
